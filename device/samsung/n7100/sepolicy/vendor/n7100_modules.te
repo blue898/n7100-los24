@@ -1,0 +1,15 @@
+# n7100-modules.sh: loads the netfilter modules netd needs (nothing else autoloads them)
+type n7100_modules, domain;
+type n7100_modules_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(n7100_modules)
+
+allow n7100_modules vendor_shell_exec:file rx_file_perms;
+allow n7100_modules vendor_toolbox_exec:file rx_file_perms;
+allow n7100_modules vendor_file:file r_file_perms;
+allow n7100_modules vendor_kernel_modules:file r_file_perms;
+allow n7100_modules self:capability sys_module;
+allow n7100_modules vendor_kernel_modules:system module_load;
+allow n7100_modules vendor_file:system module_load;
+# modprobe reads module parameters from the kernel command line
+allow n7100_modules proc_cmdline:file r_file_perms;
+allow n7100_modules kmsg_device:chr_file w_file_perms;

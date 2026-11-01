@@ -1,0 +1,89 @@
+From 42145dcf8bdeb94d08d4fd1f7e2a036715cac2ab Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 13:51:16 +0100
+Subject: [PATCH 88/89] fs: don't move a still-shared init fs_struct to nullfs
+
+Since commit 9a8e29695888 ("fs: make userspace_init_fs a
+dynamically-initialized pointer"), validate_fs_switch() points root and
+pwd of userspace_init_fs at init_fs's root as soon as PID 1's
+thread-group leader stops using it, i.e. on unshare(CLONE_FS) or
+unshare(CLONE_NEWNS). Since commit 32750c77e811 ("fs: start all kthreads
+in nullfs") that root is a private nullfs instance.
+
+But userspace_init_fs is PID 1's own fs_struct. Every thread of PID 1
+(pthreads are created with CLONE_FS) and every CLONE_FS child shares it,
+and those tasks keep running on it after the leader switched away.
+set_fs_root()/set_fs_pwd() pull the root out from under them, and every
+path lookup they do afterwards fails with -ENOENT.
+
+Android's init hits this on every boot. Its property service runs in a
+separate thread, and SetupMountNamespaces() calls unshare(CLONE_NEWNS)
+from the main thread. From then on, the property service thread can no
+longer open /sys/fs/selinux/access. libselinux's avc_has_perm() fails
+and reports every property_service:set check as an SELinux denial
+(permissive=0, even with SELinux permissive), so init can't set any
+property and boot does not complete:
+
+  VFS: Pid 1 stopped sharing filesystem state
+  audit: type=1107 ... msg='avc:  denied  { set } for
+    property=ro.init.mnt_ns.count ... scontext=u:r:init:s0
+    tcontext=u:object_r:init_mnt_ns_prop:s0 tclass=property_service
+    permissive=0'
+
+Only move the fs_struct to nullfs once nothing but the global
+userspace_init_fs reference is left on it. While other tasks still use
+it, it is live userspace state, not stale state, so leave it alone as
+kernels before 7.3 did. A usermodehelper never shares it: copy_fs()
+rejects CLONE_FS for COPY_FS_UMH and gives it a copy instead.
+
+Fixes: 9a8e29695888 ("fs: make userspace_init_fs a dynamically-initialized pointer")
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ fs/fs_struct.c | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/fs/fs_struct.c b/fs/fs_struct.c
+index 34699f3b6..106e36296 100644
+--- a/fs/fs_struct.c
++++ b/fs/fs_struct.c
+@@ -185,6 +185,8 @@ EXPORT_SYMBOL_GPL(unshare_fs_struct);
+  */
+ static inline void validate_fs_switch(struct fs_struct *old_fs)
+ {
++	bool shared;
++
+ 	might_sleep();
+ 
+ 	if (likely(current->pid != 1))
+@@ -192,7 +194,26 @@ static inline void validate_fs_switch(struct fs_struct *old_fs)
+ 	/* @old_fs may be dangling but for comparison it's fine */
+ 	if (old_fs != userspace_init_fs)
+ 		return;
+-	pr_warn("VFS: Pid 1 stopped sharing filesystem state\n");
++
++	/*
++	 * userspace_init_fs holds its own reference, so @old_fs is still
++	 * alive here. Only PID 1's thread-group leader switched away: its
++	 * other threads (or CLONE_FS children) may still run on this
++	 * fs_struct. Android's init does exactly that: its property service
++	 * thread keeps using it after the main thread's unshare(CLONE_NEWNS).
++	 * Moving it to nullfs would make every path lookup of those tasks
++	 * fail with -ENOENT, so only do that once nothing but the global
++	 * reference is left.
++	 */
++	read_seqlock_excl(&old_fs->seq);
++	shared = old_fs->users > 1;
++	read_sequnlock_excl(&old_fs->seq);
++
++	pr_warn("VFS: Pid 1 stopped sharing filesystem state%s\n",
++		shared ? " (still used by other tasks, left alone)" : "");
++	if (shared)
++		return;
++
+ 	set_fs_root(userspace_init_fs, &init_fs.root);
+ 	set_fs_pwd(userspace_init_fs, &init_fs.root);
+ }
+-- 
+2.53.0
+

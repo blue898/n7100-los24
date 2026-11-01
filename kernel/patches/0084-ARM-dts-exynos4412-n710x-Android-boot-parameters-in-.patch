@@ -1,0 +1,33 @@
+From 0f10c453dd06474502dd182e75f14d5abbbd5d25 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 11:20:40 +0100
+Subject: [PATCH 84/89] ARM: dts: exynos4412-n710x: Android boot parameters in
+ /chosen/bootargs
+
+sboot's ATAG command line carries androidboot.selinux=enforcing and Android init
+takes the first occurrence; with ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND these come first.
+---
+ arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 604a3fc4c..0e2cc4d82 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -240,3 +240,13 @@ &touchkey_reg {
+ 	gpio = <&gpm0 5 GPIO_ACTIVE_HIGH>;
+ 	status = "okay";
+ };
++
++/*
++ * Boot parameters for Android. sboot's ATAG command line already carries
++ * androidboot.selinux=enforcing and Android init takes the first occurrence, so
++ * these go first and the decompressor appends sboot's line after them
++ * (CONFIG_ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND).
++ */
++&{/chosen} {
++	bootargs = "console=tty0 panic=10 s3c2410_wdt.tmr_atboot=1 androidboot.init_fatal_reboot_target=normal androidboot.hardware=n7100 androidboot.selinux=permissive androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
++};
+-- 
+2.53.0
+

@@ -1,0 +1,186 @@
+From 9f41a3207218e7bbb295dcdd019b5534e10a017d Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Fri, 19 Jul 2024 23:09:32 +0200
+Subject: [PATCH 29/89] phy: samsung-usb2: Add common interface for USB mode
+ switch
+
+The Exynos 4x12 and 5250/5420 have a "mode switch" register which is
+used to toggle between "device" and "host" modes. This switch is
+necessary to get the "hsotg" (peripheral) or host mode (EHCI/OHCI)
+controllers to work.
+
+Move the logic for setting these modes to separate "set mode switch"
+functions rather than modifying the regmap directly, and keep those
+functions in the SoC-specific PHY configs for easier access.
+
+This is done in preparation for an extcon-based mode switch mechanism
+which will use these functions.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ drivers/phy/samsung/phy-exynos4x12-usb2.c | 40 ++++++++++++++++-------
+ drivers/phy/samsung/phy-exynos5250-usb2.c | 30 ++++++++++++++---
+ drivers/phy/samsung/phy-samsung-usb2.h    |  7 ++++
+ 3 files changed, 62 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/phy/samsung/phy-exynos4x12-usb2.c b/drivers/phy/samsung/phy-exynos4x12-usb2.c
+index b528a5d03..89ee1d26c 100644
+--- a/drivers/phy/samsung/phy-exynos4x12-usb2.c
++++ b/drivers/phy/samsung/phy-exynos4x12-usb2.c
+@@ -189,6 +189,29 @@ static void exynos4x12_isol(struct samsung_usb2_phy_instance *inst, bool on)
+ 	regmap_update_bits(drv->reg_pmu, offset, mask, on ? 0 : mask);
+ }
+ 
++static int exynos4x12_set_mode_switch(struct samsung_usb2_phy_driver *drv,
++			enum samsung_usb2_mode_switch mode)
++{
++	unsigned int val;
++
++	if (!drv->cfg->has_mode_switch)
++		return 0; /* Nothing to do */
++
++	switch (mode) {
++	case EXYNOS_MODE_SWITCH_DEVICE:
++		val = EXYNOS_4x12_MODE_SWITCH_DEVICE;
++		break;
++	case EXYNOS_MODE_SWITCH_HOST:
++		val = EXYNOS_4x12_MODE_SWITCH_HOST;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return regmap_update_bits(drv->reg_sys, EXYNOS_4x12_MODE_SWITCH_OFFSET,
++					EXYNOS_4x12_MODE_SWITCH_MASK, val);
++}
++
+ static void exynos4x12_setup_clk(struct samsung_usb2_phy_instance *inst)
+ {
+ 	struct samsung_usb2_phy_driver *drv = inst->drv;
+@@ -275,16 +298,12 @@ static int exynos4x12_power_on(struct samsung_usb2_phy_instance *inst)
+ 		return 0;
+ 
+ 	if (inst->cfg->id == EXYNOS4x12_HOST) {
+-		regmap_update_bits(drv->reg_sys, EXYNOS_4x12_MODE_SWITCH_OFFSET,
+-						EXYNOS_4x12_MODE_SWITCH_MASK,
+-						EXYNOS_4x12_MODE_SWITCH_HOST);
++		exynos4x12_set_mode_switch(drv, EXYNOS_MODE_SWITCH_HOST);
+ 		exynos4x12_power_on_int(&drv->instances[EXYNOS4x12_DEVICE]);
+ 	}
+ 
+-	if (inst->cfg->id == EXYNOS4x12_DEVICE && drv->cfg->has_mode_switch)
+-		regmap_update_bits(drv->reg_sys, EXYNOS_4x12_MODE_SWITCH_OFFSET,
+-						EXYNOS_4x12_MODE_SWITCH_MASK,
+-						EXYNOS_4x12_MODE_SWITCH_DEVICE);
++	if (inst->cfg->id == EXYNOS4x12_DEVICE)
++		exynos4x12_set_mode_switch(drv, EXYNOS_MODE_SWITCH_DEVICE);
+ 
+ 	if (inst->cfg->id == EXYNOS4x12_HSIC0 ||
+ 		inst->cfg->id == EXYNOS4x12_HSIC1) {
+@@ -313,10 +332,8 @@ static int exynos4x12_power_off(struct samsung_usb2_phy_instance *inst)
+ 	if (inst->ext_cnt-- > 1)
+ 		return 0;
+ 
+-	if (inst->cfg->id == EXYNOS4x12_DEVICE && drv->cfg->has_mode_switch)
+-		regmap_update_bits(drv->reg_sys, EXYNOS_4x12_MODE_SWITCH_OFFSET,
+-						EXYNOS_4x12_MODE_SWITCH_MASK,
+-						EXYNOS_4x12_MODE_SWITCH_HOST);
++	if (inst->cfg->id == EXYNOS4x12_DEVICE)
++		exynos4x12_set_mode_switch(drv, EXYNOS_MODE_SWITCH_HOST);
+ 
+ 	if (inst->cfg->id == EXYNOS4x12_HOST)
+ 		exynos4x12_power_off_int(&drv->instances[EXYNOS4x12_DEVICE]);
+@@ -372,4 +389,5 @@ const struct samsung_usb2_phy_config exynos4x12_usb2_phy_config = {
+ 	.num_phys		= EXYNOS4x12_NUM_PHYS,
+ 	.phys			= exynos4x12_phys,
+ 	.rate_to_clk		= exynos4x12_rate_to_clk,
++	.set_mode_switch	= exynos4x12_set_mode_switch,
+ };
+diff --git a/drivers/phy/samsung/phy-exynos5250-usb2.c b/drivers/phy/samsung/phy-exynos5250-usb2.c
+index 21b06072f..e4c2c9112 100644
+--- a/drivers/phy/samsung/phy-exynos5250-usb2.c
++++ b/drivers/phy/samsung/phy-exynos5250-usb2.c
+@@ -192,6 +192,29 @@ static void exynos5250_isol(struct samsung_usb2_phy_instance *inst, bool on)
+ 	regmap_update_bits(drv->reg_pmu, offset, mask, on ? 0 : mask);
+ }
+ 
++static int exynos5250_set_mode_switch(struct samsung_usb2_phy_driver *drv,
++			enum samsung_usb2_mode_switch mode)
++{
++	unsigned int val;
++
++	if (!drv->cfg->has_mode_switch)
++		return 0; /* Nothing to do */
++
++	switch (mode) {
++	case EXYNOS_MODE_SWITCH_DEVICE:
++		val = EXYNOS_5250_MODE_SWITCH_DEVICE;
++		break;
++	case EXYNOS_MODE_SWITCH_HOST:
++		val = EXYNOS_5250_MODE_SWITCH_HOST;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return regmap_update_bits(drv->reg_sys, EXYNOS_5250_MODE_SWITCH_OFFSET,
++					EXYNOS_5250_MODE_SWITCH_MASK, val);
++}
++
+ static int exynos5250_power_on(struct samsung_usb2_phy_instance *inst)
+ {
+ 	struct samsung_usb2_phy_driver *drv = inst->drv;
+@@ -203,10 +226,7 @@ static int exynos5250_power_on(struct samsung_usb2_phy_instance *inst)
+ 
+ 	switch (inst->cfg->id) {
+ 	case EXYNOS5250_DEVICE:
+-		regmap_update_bits(drv->reg_sys,
+-				   EXYNOS_5250_MODE_SWITCH_OFFSET,
+-				   EXYNOS_5250_MODE_SWITCH_MASK,
+-				   EXYNOS_5250_MODE_SWITCH_DEVICE);
++		exynos5250_set_mode_switch(drv, EXYNOS_MODE_SWITCH_DEVICE);
+ 
+ 		/* OTG configuration */
+ 		otg = readl(drv->reg_phy + EXYNOS_5250_USBOTGSYS);
+@@ -408,6 +428,7 @@ const struct samsung_usb2_phy_config exynos5250_usb2_phy_config = {
+ 	.num_phys		= ARRAY_SIZE(exynos5250_phys),
+ 	.phys			= exynos5250_phys,
+ 	.rate_to_clk		= exynos5250_rate_to_clk,
++	.set_mode_switch	= exynos5250_set_mode_switch,
+ };
+ 
+ const struct samsung_usb2_phy_config exynos5420_usb2_phy_config = {
+@@ -415,4 +436,5 @@ const struct samsung_usb2_phy_config exynos5420_usb2_phy_config = {
+ 	.num_phys		= ARRAY_SIZE(exynos5420_phys),
+ 	.phys			= exynos5420_phys,
+ 	.rate_to_clk		= exynos5250_rate_to_clk,
++	.set_mode_switch	= exynos5250_set_mode_switch,
+ };
+diff --git a/drivers/phy/samsung/phy-samsung-usb2.h b/drivers/phy/samsung/phy-samsung-usb2.h
+index ebaf43bfc..a1216a627 100644
+--- a/drivers/phy/samsung/phy-samsung-usb2.h
++++ b/drivers/phy/samsung/phy-samsung-usb2.h
+@@ -19,6 +19,11 @@
+ #define KHZ 1000
+ #define MHZ (KHZ * KHZ)
+ 
++enum samsung_usb2_mode_switch {
++	EXYNOS_MODE_SWITCH_DEVICE,
++	EXYNOS_MODE_SWITCH_HOST,
++};
++
+ struct samsung_usb2_phy_driver;
+ struct samsung_usb2_phy_instance;
+ struct samsung_usb2_phy_config;
+@@ -60,6 +65,8 @@ struct samsung_usb2_phy_config {
+ 	unsigned int num_phys;
+ 	bool has_mode_switch;
+ 	bool has_refclk_sel;
++	int (*set_mode_switch)(struct samsung_usb2_phy_driver *,
++			       enum samsung_usb2_mode_switch mode);
+ };
+ 
+ extern const struct samsung_usb2_phy_config exynos3250_usb2_phy_config;
+-- 
+2.53.0
+

@@ -1,0 +1,33 @@
+From 624aeea7f11806d1ee58b313844a82dee8538136 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Wed, 19 Jun 2024 15:06:22 +0200
+Subject: [PATCH 26/89] dt-bindings: phy: samsung,usb2-phy: Fix list of Exynos
+ chips w/ mode switch
+
+The Exynos 4210 does not have a mode switch register; however, the
+Exynos 5250 and 5420 do. Fix the list of chips with a mode switch
+register.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml b/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml
+index 7db7605a8..91cb1e0f1 100644
+--- a/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml
+@@ -21,8 +21,8 @@ description: |
+     3 - HSIC1 ("hsic1"),
+   Exynos3250 has only USB device phy available as phy 0.
+ 
+-  Exynos4210 and Exynos4212 use mode switching and require that mode switch
+-  register is supplied.
++  Exynos4212, Exynos5250 and Exynos5420 use mode switching and require that
++  mode switch register is supplied.
+ 
+ properties:
+   compatible:
+-- 
+2.53.0
+

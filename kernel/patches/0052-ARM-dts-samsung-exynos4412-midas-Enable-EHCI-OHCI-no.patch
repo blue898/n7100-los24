@@ -1,0 +1,44 @@
+From ac3539720748e1cf293f24a727c409636b45c340 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Tue, 30 Jul 2024 17:14:54 +0200
+Subject: [PATCH 52/89] ARM: dts: samsung: exynos4412-midas: Enable EHCI/OHCI
+ nodes
+
+Now that we have USB mode switching implemented and enabling these
+nodes won't break peripheral mode, enable the EHCI/OHCI nodes to
+allow for USB OTG.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-midas.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+index db7c78241..9f8ed715a 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+@@ -542,6 +542,10 @@ &dsi_0 {
+ 	samsung,pll-clock-frequency = <24000000>;
+ };
+ 
++&ehci {
++	status = "okay";
++};
++
+ &exynos_usbphy {
+ 	vbus-supply = <&esafeout1_reg>;
+ 	samsung,usb-connector = <&usb_conn>;
+@@ -1080,6 +1084,10 @@ &mshc_0 {
+ 	cap-mmc-highspeed;
+ };
+ 
++&ohci {
++	status = "okay";
++};
++
+ &pmu_system_controller {
+ 	assigned-clocks = <&pmu_system_controller 0>;
+ 	assigned-clock-parents = <&clock CLK_XUSBXTI>;
+-- 
+2.53.0
+

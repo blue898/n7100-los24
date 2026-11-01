@@ -1,0 +1,26 @@
+From df70b8c932f34b1183f8f9f00ed0e636c36d72d3 Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Thu, 21 Aug 2025 13:43:56 +0100
+Subject: [PATCH 70/89] ARM: dts: exynos: remove n710x compatible
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index adc9cc0f9..6bb1b1bc1 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -3,7 +3,7 @@
+ #include "exynos4412-midas.dtsi"
+ 
+ / {
+-	compatible = "samsung,n710x", "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
++	compatible = "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
+ 
+ 	memory@40000000 {
+ 		device_type = "memory";
+-- 
+2.53.0
+

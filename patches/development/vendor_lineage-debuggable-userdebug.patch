@@ -1,0 +1,14 @@
+diff --git a/config/common.mk b/config/common.mk
+index f927424..34620df 100644
+--- a/config/common.mk
++++ b/config/common.mk
+@@ -40,7 +40,8 @@ else
+ PRODUCT_SYSTEM_EXT_PROPERTIES += ro.adb.secure=1
+ 
+ # Set ro.debuggable=0 for userdebug
+-PRODUCT_NOT_DEBUGGABLE_IN_USERDEBUG := true
++# n7100 bring-up: keep userdebug debuggable
++# PRODUCT_NOT_DEBUGGABLE_IN_USERDEBUG := true
+ endif
+ 
+ # Disable extra StrictMode features on all non-engineering builds

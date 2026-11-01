@@ -1,0 +1,47 @@
+From c0d81147e76da0819105bacdd9bce3746d4cfa70 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 18:37:35 +0100
+Subject: [PATCH] drm/panel: ea8061: send HSA/HBP blanking packets, no auto
+ vertical mode
+
+On the Galaxy Note II (Exynos 4412) the first ~25 columns of every line show
+the colour-shifted tail of the previous line, and every now and then the whole
+image comes up shifted by a third of a line with rotated colour channels,
+until the display is turned off and on again.
+
+Samsung's vendor kernel drives this panel with HSA/HBP blanking packets and
+without the DSIM auto vertical mode. Testing the DSIM CONFIG bits one by one:
+clearing AUTO_MODE fixes the random line shift, and enabling the HSA/HBP
+packets fixes the stripe. EOT packets make no difference.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpu/drm/panel/panel-magnachip-ea8061.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-magnachip-ea8061.c b/drivers/gpu/drm/panel/panel-magnachip-ea8061.c
+index 8e7d08b69..e53a7fc06 100644
+--- a/drivers/gpu/drm/panel/panel-magnachip-ea8061.c
++++ b/drivers/gpu/drm/panel/panel-magnachip-ea8061.c
+@@ -734,10 +734,15 @@ static int ea8061_probe(struct mipi_dsi_device *dsi)
+ 
+ 	dsi->lanes = 4;
+ 	dsi->format = MIPI_DSI_FMT_RGB888;
++	/*
++	 * Send HSA/HBP blanking packets and let the DSIM follow FIMD's vertical
++	 * timing (no auto vertical mode), like Samsung's vendor kernel does.
++	 * With LP blanking the panel shows the tail of the previous line in the
++	 * first ~25 columns (colour-shifted), and in auto vertical mode the DSIM
++	 * can latch the line start mid-line at enable, shifting the whole image.
++	 */
+ 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST
+-		| MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_VIDEO_NO_HBP
+-		| MIPI_DSI_MODE_VIDEO_NO_HSA | MIPI_DSI_MODE_NO_EOT_PACKET
+-		| MIPI_DSI_MODE_VIDEO_AUTO_VERT;
++		| MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_NO_EOT_PACKET;
+ 
+ 	ret = ea8061_parse_dt(ctx);
+ 	if (ret < 0)
+-- 
+2.53.0
+

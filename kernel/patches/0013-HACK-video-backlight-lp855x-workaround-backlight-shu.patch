@@ -1,0 +1,29 @@
+From 42b7b708cb1725a48581e151f72ae99efed57bbc Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Sat, 15 Apr 2023 08:31:46 +0200
+Subject: [PATCH 13/89] (HACK) video: backlight: lp855x: workaround backlight
+ shutting down at full brightness
+
+Likely a device-specific issue that needs investigation.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ drivers/video/backlight/lp855x_bl.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/video/backlight/lp855x_bl.c b/drivers/video/backlight/lp855x_bl.c
+index 43a2123d3..e4abe7981 100644
+--- a/drivers/video/backlight/lp855x_bl.c
++++ b/drivers/video/backlight/lp855x_bl.c
+@@ -232,6 +232,8 @@ static int lp855x_pwm_ctrl(struct lp855x *lp, int br, int max_br)
+ 	}
+ 
+ 	state.duty_cycle = div_u64(br * state.period, max_br);
++	if (state.duty_cycle == state.period)
++		state.duty_cycle = state.period - 1;
+ 	state.enabled = state.duty_cycle;
+ 
+ 	return pwm_apply_might_sleep(lp->pwm, &state);
+-- 
+2.53.0
+

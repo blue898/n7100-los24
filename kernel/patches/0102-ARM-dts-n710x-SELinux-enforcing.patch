@@ -1,0 +1,29 @@
+From 57c8a91d88e3a931822774c8d317cb77eb987051 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 20:36:10 +0100
+Subject: [PATCH 102/102] ARM: dts: n710x: SELinux enforcing
+
+The policy is complete: drop androidboot.selinux=permissive, so sboot's own
+androidboot.selinux=enforcing is the one Android init sees.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 1095a0218..1a2f9fa09 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -284,7 +284,7 @@ &touchkey_reg {
+  * (CONFIG_ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND).
+  */
+ &{/chosen} {
+-	bootargs = "console=tty0 panic=10 s3c2410_wdt.tmr_atboot=1 printk.devkmsg=on sysctl.net.core.bpf_jit_enable=1 androidboot.init_fatal_reboot_target=recovery androidboot.hardware=n7100 androidboot.selinux=permissive androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
++	bootargs = "console=tty0 panic=10 s3c2410_wdt.tmr_atboot=1 printk.devkmsg=on sysctl.net.core.bpf_jit_enable=1 androidboot.init_fatal_reboot_target=recovery androidboot.hardware=n7100 androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
+ };
+ 
+ /*
+-- 
+2.53.0
+

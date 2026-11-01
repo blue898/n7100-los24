@@ -1,0 +1,44 @@
+From c00e5cfd96080f42cdbe14adf6ee1f811e511900 Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Sun, 31 Aug 2025 21:34:09 +0100
+Subject: [PATCH 78/89] ARM: dts: exynos: add kona touchkey leds
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+[ grimler: use generic led-controller node name ]
+Signed-off-by: Henrik Grimler <henrik@grimler.se>
+---
+ arch/arm/boot/dts/samsung/exynos4412-kona.dtsi | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-kona.dtsi b/arch/arm/boot/dts/samsung/exynos4412-kona.dtsi
+index 0ba4a566e..6bc8a27b5 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-kona.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-kona.dtsi
+@@ -15,6 +15,7 @@
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/linux-event-codes.h>
+ #include <dt-bindings/interrupt-controller/irq.h>
++#include <dt-bindings/leds/common.h>
+ 
+ / {
+ 	compatible = "samsung,kona", "samsung,exynos4412", "samsung,exynos4";
+@@ -274,6 +275,16 @@ rom-a5h {
+ 
+ 		};
+ 	};
++
++	led-controller {
++		compatible = "gpio-leds";
++		led-0 {
++			gpios = <&gpm0 5 GPIO_ACTIVE_HIGH>;
++			default-state = "off";
++			function = LED_FUNCTION_KBD_BACKLIGHT;
++			color = <LED_COLOR_ID_WHITE>;
++		};
++	};
+ };
+ 
+ &adc {
+-- 
+2.53.0
+

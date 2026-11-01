@@ -1,0 +1,42 @@
+From 710e048c39041aefeafc35ef7578348036004588 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Tue, 30 Jul 2024 16:57:58 +0200
+Subject: [PATCH 49/89] ARM: dts: samsung: exynos4412-midas: Add battery node
+ with charge current
+
+Add a battery node with the constant charge current value and pass it
+to the MAX77693 charger so that the fast charge current setting can be
+used for charging.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-midas.dtsi | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+index fcbb797f1..b69023a7c 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+@@ -238,6 +238,7 @@ motor-driver {
+ 
+ 			charger {
+ 				compatible = "maxim,max77693-charger";
++				monitored-battery = <&battery>;
+ 
+ 				maxim,constant-microvolt = <4350000>;
+ 				maxim,min-system-microvolt = <3600000>;
+@@ -373,6 +374,11 @@ wlan_pwrseq: sdhci3-pwrseq {
+ 		clock-names = "ext_clock";
+ 	};
+ 
++	battery: battery {
++		compatible = "simple-battery";
++		constant-charge-current-max-microamp = <1800000>;
++	};
++
+ 	sound: sound {
+ 		compatible = "samsung,midas-audio";
+ 		model = "Midas";
+-- 
+2.53.0
+

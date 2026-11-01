@@ -1,0 +1,54 @@
+From e38b0ad55c7499afb86fffc2731493f17b60cecb Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Wed, 19 Jun 2024 15:05:04 +0200
+Subject: [PATCH 27/89] dt-bindings: phy: samsung,usb2-phy: Add
+ samsung,usb-connector property
+
+Add a property for an extcon device port representing a USB connector
+for updating the mode switch register on the Exynos 4x12/Exynos 5250/
+Exynos 5420 based on the detected cable type.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ .../bindings/phy/samsung,usb2-phy.yaml         | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml b/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml
+index 91cb1e0f1..33dc8c93e 100644
+--- a/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/samsung,usb2-phy.yaml
+@@ -60,6 +60,12 @@ properties:
+     description:
+       Phandle to system registers interface.
+ 
++  samsung,usb-connector:
++    description:
++      Phandle to a port of an extcon device representing a USB connector
++      to use for OTG mode switch. If this property is not set, the mode
++      will be selected based on the powered-on PHY.
++
+   vbus-supply:
+     description:
+       VBUS power source.
+@@ -84,6 +90,18 @@ allOf:
+     then:
+       required:
+         - samsung,sysreg-phandle
++  - if:
++      properties:
++        compatible:
++          not:
++            contains:
++              enum:
++                - samsung,exynos4x12-usb2-phy
++                - samsung,exynos5250-usb2-phy
++                - samsung,exynos5420-usb2-phy
++    then:
++      properties:
++        samsung,usb-connector: false
+ 
+ additionalProperties: false
+ 
+-- 
+2.53.0
+

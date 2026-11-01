@@ -1,0 +1,5702 @@
+From 466e38fa4f62765c9a1191bb89a5f6ad130adc08 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 17:07:34 +0100
+Subject: [PATCH] misc: add Samsung modem_if for the Note II's XMM6262, enable
+ it on n710x
+
+Port of Samsung's modem_if (drivers/misc/modem_if of the Galaxy S III/Note II
+3.0 kernels), reduced to the configuration of the GT-N7100: Intel/Infineon
+XMM6262 3G modem on the Exynos4412's HSIC0 port, SIPC4 framing, runtime L2
+link PM over the HOST_WAKEUP/SLAVE_WAKEUP handshake. The userspace interface
+is kept, so Samsung's boot daemon (cbd) and RIL run unchanged:
+/dev/umts_boot0, umts_ipc0, umts_rfs0, umts_csd, umts_router, umts_ramdump0,
+umts_loopback0, multipdp, /dev/link_pm, rmnet0-2 and
+/sys/devices/platform/s5p-ehci/ehci_power (forwarded to the exynos-ehci
+ehci_power hack).
+
+Changes against Samsung's code: GPIOs from the device tree (board-m0-modems.c
+folded into modem_main.c), Android wakelocks mapped onto wakeup sources, no
+AP panic on a CP crash dump request, NULL ops guarded, current kernel APIs.
+
+The modem needs the PMIC's 32 kHz CP clock: the boot ROM loads PSI/EBL and
+the firmware without it, but the firmware then hangs (PHONE_ACTIVE high,
+never enumerates as 1519:0020). Stock left the clock on from the bootloader;
+mainline gates it as unused, so the modem node takes it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/samsung/exynos4412-n710x.dtsi    |   20 +
+ drivers/misc/Kconfig                          |    1 +
+ drivers/misc/Makefile                         |    1 +
+ drivers/misc/modem_if/Kconfig                 |    9 +
+ drivers/misc/modem_if/Makefile                |    4 +
+ drivers/misc/modem_if/modem.h                 |  169 ++
+ .../misc/modem_if/modem_link_device_hsic.c    | 1597 +++++++++++++++++
+ .../misc/modem_if/modem_link_device_hsic.h    |  155 ++
+ drivers/misc/modem_if/modem_main.c            |  522 ++++++
+ .../modem_if/modem_modemctl_device_xmm6262.c  |  359 ++++
+ drivers/misc/modem_if/modem_prj.h             |  817 +++++++++
+ drivers/misc/modem_if/modem_utils.c           |  191 ++
+ drivers/misc/modem_if/modem_utils.h           |   93 +
+ drivers/misc/modem_if/sipc4_io_device.c       | 1555 ++++++++++++++++
+ drivers/misc/modem_if/wakelock.h              |   48 +
+ 15 files changed, 5541 insertions(+)
+ create mode 100755 drivers/misc/modem_if/Kconfig
+ create mode 100755 drivers/misc/modem_if/Makefile
+ create mode 100755 drivers/misc/modem_if/modem.h
+ create mode 100755 drivers/misc/modem_if/modem_link_device_hsic.c
+ create mode 100755 drivers/misc/modem_if/modem_link_device_hsic.h
+ create mode 100755 drivers/misc/modem_if/modem_main.c
+ create mode 100755 drivers/misc/modem_if/modem_modemctl_device_xmm6262.c
+ create mode 100755 drivers/misc/modem_if/modem_prj.h
+ create mode 100755 drivers/misc/modem_if/modem_utils.c
+ create mode 100755 drivers/misc/modem_if/modem_utils.h
+ create mode 100755 drivers/misc/modem_if/sipc4_io_device.c
+ create mode 100755 drivers/misc/modem_if/wakelock.h
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 66b984a8e..8fe55e0e7 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -44,6 +44,26 @@ cam_vdda_reg: voltage-regulator-10 {
+ 		gpio = <&gpm4 1 GPIO_ACTIVE_HIGH>;
+ 		enable-active-high;
+ 	};
++
++	/* Intel/Infineon XMM6262 3G modem on HSIC0 (Samsung modem_if, board-m0-modems.c) */
++	modem {
++		compatible = "samsung,n7100-modem-xmm6262";
++		samsung,hsic-host = <&ehci>;
++		/* the CP's 32 kHz sleep clock: without it the firmware hangs after the boot ROM stage */
++		clocks = <&max77686 MAX77686_CLK_CP>;
++		clock-names = "cp";
++		cp-on-gpios = <&gpl2 5 GPIO_ACTIVE_HIGH>;
++		reset-req-gpios = <&gpm3 3 GPIO_ACTIVE_HIGH>;
++		cp-reset-gpios = <&gpx3 2 GPIO_ACTIVE_HIGH>;
++		pda-active-gpios = <&gpf1 6 GPIO_ACTIVE_HIGH>;
++		phone-active-gpios = <&gpx1 6 GPIO_ACTIVE_HIGH>;
++		cp-dump-int-gpios = <&gpx1 2 GPIO_ACTIVE_HIGH>;
++		ap-dump-int-gpios = <&gpj0 1 GPIO_ACTIVE_HIGH>;
++		suspend-req-gpios = <&gpm2 4 GPIO_ACTIVE_HIGH>;
++		link-active-gpios = <&gpf1 1 GPIO_ACTIVE_HIGH>;
++		host-wakeup-gpios = <&gpx1 1 GPIO_ACTIVE_HIGH>;
++		slave-wakeup-gpios = <&gpx1 0 GPIO_ACTIVE_HIGH>;
++	};
+ };
+ 
+ &buck9_reg {
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 9f2530611..abb4b2ea8 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -589,6 +589,7 @@ source "drivers/misc/vmw_vmci/Kconfig"
+ source "drivers/misc/genwqe/Kconfig"
+ source "drivers/misc/ocxl/Kconfig"
+ source "drivers/misc/bcm-vk/Kconfig"
++source "drivers/misc/modem_if/Kconfig"
+ source "drivers/misc/cardreader/Kconfig"
+ source "drivers/misc/uacce/Kconfig"
+ source "drivers/misc/pvpanic/Kconfig"
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index adebaf765..d9b8c7315 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -72,3 +72,4 @@ obj-y				+= amd-sbi/
+ obj-$(CONFIG_MISC_RP1)		+= rp1/
+ obj-$(CONFIG_INTEL_SSEI)	+= issei/
+ obj-$(CONFIG_SAMSUNG_SSP_SENSORHUB)	+= samsung-ssp.o
++obj-$(CONFIG_SAMSUNG_MODEM_IF)	+= modem_if/
+diff --git a/drivers/misc/modem_if/Kconfig b/drivers/misc/modem_if/Kconfig
+new file mode 100755
+index 000000000..5ff6b9a60
+--- /dev/null
++++ b/drivers/misc/modem_if/Kconfig
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: GPL-2.0
++config SAMSUNG_MODEM_IF
++	tristate "Samsung modem interface (XMM6262 over HSIC)"
++	depends on USB && USB_EHCI_EXYNOS && GPIOLIB && GPIOLIB_LEGACY && NET && OF
++	help
++	  Samsung's modem_if driver from the Galaxy S III/Note II kernels,
++	  for the Intel/Infineon XMM6262 3G modem on the Exynos4412's HSIC
++	  port (SIPC4 framing). It provides the character and network
++	  devices Samsung's modem boot daemon (cbd) and RIL expect.
+diff --git a/drivers/misc/modem_if/Makefile b/drivers/misc/modem_if/Makefile
+new file mode 100755
+index 000000000..3e7015b34
+--- /dev/null
++++ b/drivers/misc/modem_if/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_SAMSUNG_MODEM_IF) += modem_if.o
++modem_if-y := modem_main.o modem_modemctl_device_xmm6262.o \
++	      modem_link_device_hsic.o sipc4_io_device.o modem_utils.o
+diff --git a/drivers/misc/modem_if/modem.h b/drivers/misc/modem_if/modem.h
+new file mode 100755
+index 000000000..f5d764133
+--- /dev/null
++++ b/drivers/misc/modem_if/modem.h
+@@ -0,0 +1,169 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2010 Google, Inc.
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * Samsung modem interface (modem_if) platform data, trimmed to what the
++ * XMM6262-over-HSIC configuration of the Galaxy Note II (GT-N7100) uses.
++ */
++#ifndef __MODEM_IF_H__
++#define __MODEM_IF_H__
++
++#include <linux/platform_device.h>
++#include <linux/miscdevice.h>
++
++enum modem_t {
++	IMC_XMM6260,
++	IMC_XMM6262,
++	DUMMY,
++	MAX_MODEM_TYPE
++};
++
++enum dev_format {
++	IPC_FMT,
++	IPC_RAW,
++	IPC_RFS,
++	IPC_MULTI_RAW,
++	IPC_CMD,
++	IPC_BOOT,
++	IPC_RAMDUMP,
++	IPC_DEBUG,
++	MAX_DEV_FORMAT,
++};
++#define MAX_IPC_DEV	(IPC_RFS + 1)	/* FMT, RAW, RFS */
++
++enum modem_io {
++	IODEV_MISC,
++	IODEV_NET,
++	IODEV_DUMMY,
++};
++
++enum modem_link {
++	LINKDEV_UNDEFINED,
++	LINKDEV_MIPI,
++	LINKDEV_USB,
++	LINKDEV_HSIC,
++	LINKDEV_DPRAM,
++	LINKDEV_PLD,
++	LINKDEV_C2C,
++	LINKDEV_SHMEM,
++	LINKDEV_SPI,
++	LINKDEV_MAX
++};
++#define LINKTYPE(modem_link) (1u << (modem_link))
++
++enum modem_network {
++	UMTS_NETWORK,
++	CDMA_NETWORK,
++	TDSCDMA_NETWORK,
++	LTE_NETWORK,
++	MAX_MODEM_NETWORK
++};
++
++enum sipc_ver {
++	NO_SIPC_VER = 0,
++	SIPC_VER_40 = 40,
++	SIPC_VER_41 = 41,
++	SIPC_VER_42 = 42,
++	SIPC_VER_50 = 50,
++	MAX_SIPC_VER
++};
++
++/**
++ * struct modem_io_t - declaration for io_device
++ * @name:	device name
++ * @id:		for SIPC4, contains format & channel information
++ *		(id & 11100000b)>>5 = format  (eg, 0=FMT, 1=RAW, 2=RFS)
++ *		(id & 00011111b)    = channel (valid only if format is RAW)
++ * @format:	device format
++ * @io_type:	type of this io_device
++ * @links:	list of link_devices to use this io_device
++ * @tx_link:	when you use 2+ link devices, set the link for TX
++ */
++struct modem_io_t {
++	char *name;
++	int   id;
++	enum dev_format format;
++	enum modem_io io_type;
++	enum modem_link links;
++	enum modem_link tx_link;
++	char *app;
++};
++
++struct modemlink_pm_data {
++	char *name;
++	/* link power control 2 types : pin & regulator control */
++	int (*link_ldo_enable)(bool);
++	unsigned gpio_link_enable;
++	unsigned gpio_link_active;
++	unsigned gpio_link_hostwake;
++	unsigned gpio_link_slavewake;
++	int (*link_reconnect)(void);
++	int autosuspend_delay_ms; /* if zero, the default value is used */
++	void (*ehci_reg_dump)(struct device *);
++};
++
++struct modemlink_pm_link_activectl {
++	int gpio_initialized;
++	int gpio_request_host_active;
++};
++
++/* platform data */
++struct modem_data {
++	char *name;
++
++	unsigned gpio_cp_on;
++	unsigned gpio_cp_off;
++	unsigned gpio_reset_req_n;
++	unsigned gpio_cp_reset;
++	unsigned gpio_pda_active;
++	unsigned gpio_phone_active;
++	int irq_phone_active;
++
++	unsigned gpio_cp_dump_int;
++	unsigned gpio_ap_dump_int;
++	unsigned gpio_flm_uart_sel;
++	unsigned gpio_cp_warm_reset;
++	unsigned gpio_sim_detect;
++	int irq_sim_detect;
++
++	/* Modem component */
++	enum modem_network modem_net;
++	enum modem_t modem_type;
++	enum modem_link link_types;
++	char *link_name;
++
++	/* SIPC version */
++	enum sipc_ver ipc_version;
++
++	/* Information of IO devices */
++	unsigned num_iodevs;
++	struct modem_io_t *iodevs;
++
++	/* Modem link PM support */
++	struct modemlink_pm_data *link_pm_data;
++
++	/* Handover with 2+ modems */
++	bool use_handover;
++
++	/* SIM Detect polarity */
++	bool sim_polarity;
++
++	void (*gpio_revers_bias_clear)(void);
++	void (*gpio_revers_bias_restore)(void);
++};
++
++#define LOG_TAG	"mif: "
++#define CALLER	(__builtin_return_address(0))
++
++#define mif_err(fmt, ...) \
++	pr_err(LOG_TAG "%s: " pr_fmt(fmt), __func__, ##__VA_ARGS__)
++#define mif_debug(fmt, ...) \
++	pr_debug(LOG_TAG "%s: " pr_fmt(fmt), __func__, ##__VA_ARGS__)
++#define mif_info(fmt, ...) \
++	pr_info(LOG_TAG "%s: " pr_fmt(fmt), __func__, ##__VA_ARGS__)
++#define mif_trace(fmt, ...) \
++	printk(KERN_DEBUG "mif: %s: %d: called(%pS): " fmt, \
++		__func__, __LINE__, __builtin_return_address(0), ##__VA_ARGS__)
++
++#endif
+diff --git a/drivers/misc/modem_if/modem_link_device_hsic.c b/drivers/misc/modem_if/modem_link_device_hsic.c
+new file mode 100755
+index 000000000..4573faed6
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_link_device_hsic.c
+@@ -0,0 +1,1597 @@
++/* /linux/drivers/new_modem_if/link_dev_usb.c
++ *
++ * Copyright (C) 2010 Google, Inc.
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/device.h>
++#include <linux/sched.h>
++#include <linux/irq.h>
++#include <linux/poll.h>
++#include <linux/gpio.h>
++#include <linux/if_arp.h>
++#include <linux/usb.h>
++#include <linux/usb/cdc.h>
++#include <linux/pm_runtime.h>
++#include <linux/cdev.h>
++#include <linux/platform_device.h>
++#include "wakelock.h"
++#include <linux/suspend.h>
++#include <linux/version.h>
++
++#include "modem.h"
++#include "modem_prj.h"
++#include "modem_link_device_hsic.h"
++#include "modem_utils.h"
++
++static struct modem_ctl *if_usb_get_modemctl(struct link_pm_data *pm_data);
++static int link_pm_runtime_get_active(struct link_pm_data *pm_data);
++static int usb_tx_urb_with_skb(struct usb_device *usbdev, struct sk_buff *skb,
++					struct if_usb_devdata *pipe_data);
++#ifdef FOR_TEGRA
++#define ehci_vendor_txfilltuning tegra_ehci_txfilltuning
++#else
++#define ehci_vendor_txfilltuning()
++#endif
++static void usb_rx_complete(struct urb *urb);
++static struct usb_driver if_usb_driver;
++
++static int start_ipc(struct link_device *ld, struct io_device *iod)
++{
++	struct sk_buff *skb;
++	char data[1] = {'a'};
++	int err;
++	struct usb_link_device *usb_ld = to_usb_link_device(ld);
++	struct link_pm_data *pm_data = usb_ld->link_pm_data;
++	struct device *dev = &usb_ld->usbdev->dev;
++	struct if_usb_devdata *pipe_data = &usb_ld->devdata[IF_USB_FMT_EP];
++
++	if (!usb_ld->if_usb_connected) {
++		mif_err("HSIC not connected, skip start ipc\n");
++		err = -ENODEV;
++		goto exit;
++	}
++
++retry:
++	if (ld->mc->phone_state != STATE_ONLINE) {
++		mif_err("MODEM is not online, skip start ipc\n");
++		err = -ENODEV;
++		goto exit;
++	}
++
++	/* check usb runtime pm first */
++	if (dev->power.runtime_status != RPM_ACTIVE) {
++		if (!pm_data->resume_requested) {
++			mif_debug("QW PM\n");
++			reinit_completion(&pm_data->active_done);
++			queue_delayed_work(pm_data->wq,
++					&pm_data->link_pm_work, 0);
++		}
++		mif_debug("Wait pm\n");
++		err = wait_for_completion_timeout(&pm_data->active_done,
++							msecs_to_jiffies(500));
++		/* timeout or -ERESTARTSYS */
++		if (err <= 0)
++			goto retry;
++	}
++
++	pm_runtime_get_sync(dev);
++
++	mif_err("send 'a'\n");
++
++	skb = alloc_skb(16, GFP_ATOMIC);
++	if (unlikely(!skb)) {
++		pm_runtime_put(dev);
++		return -ENOMEM;
++	}
++	memcpy(skb_put(skb, 1), data, 1);
++	skbpriv(skb)->iod = iod;
++	skbpriv(skb)->ld = ld;
++
++	if (!usb_ld->if_usb_connected || !usb_ld->usbdev)
++		return -ENODEV;
++
++	usb_mark_last_busy(usb_ld->usbdev);
++	err = usb_tx_urb_with_skb(usb_ld->usbdev, skb, pipe_data);
++	if (err < 0) {
++		mif_err("usb_tx_urb fail\n");
++		dev_kfree_skb_any(skb);
++	}
++
++	pm_runtime_put(dev);
++exit:
++	return err;
++}
++
++static void stop_ipc(struct link_device *ld)
++{
++	ld->com_state = COM_NONE;
++}
++
++static int usb_init_communication(struct link_device *ld,
++			struct io_device *iod)
++{
++	struct task_struct *task = get_current();
++	char str[TASK_COMM_LEN];
++
++	mif_info("%d:%s\n", task->pid, get_task_comm(str, task));
++
++	/* Send IPC Start ASCII 'a' */
++	if (iod->id == 0x1)
++		return start_ipc(ld, iod);
++
++	return 0;
++}
++
++static void usb_terminate_communication(struct link_device *ld,
++			struct io_device *iod)
++{
++	if (iod->id != 0x1 || iod->format != IPC_FMT)
++		return;
++
++	if (iod->mc->phone_state == STATE_CRASH_RESET ||
++			iod->mc->phone_state == STATE_CRASH_EXIT)
++		stop_ipc(ld);
++}
++
++static int usb_rx_submit(struct usb_link_device *usb_ld,
++					struct if_usb_devdata *pipe_data,
++					gfp_t gfp_flags)
++{
++	int ret;
++	struct urb *urb;
++
++	if (pipe_data->disconnected)
++		return -ENOENT;
++
++	ehci_vendor_txfilltuning();
++
++	urb = pipe_data->urb;
++
++	urb->transfer_flags = 0;
++	usb_fill_bulk_urb(urb, pipe_data->usbdev,
++				pipe_data->rx_pipe, pipe_data->rx_buf,
++				pipe_data->rx_buf_size, usb_rx_complete,
++				(void *)pipe_data);
++
++	if (pipe_data->disconnected)
++		return -ENOENT;
++
++	usb_mark_last_busy(usb_ld->usbdev);
++	ret = usb_submit_urb(urb, gfp_flags);
++	if (ret)
++		mif_err("submit urb fail with ret (%d)\n", ret);
++
++	return ret;
++}
++
++static void usb_rx_retry_work(struct work_struct *work)
++{
++	int ret = 0;
++	struct usb_link_device *usb_ld =
++		container_of(work, struct usb_link_device, rx_retry_work.work);
++	struct urb *urb = usb_ld->retry_urb;
++	struct if_usb_devdata *pipe_data = urb->context;
++	struct io_device *iod;
++	int iod_format;
++
++	if (!usb_ld->if_usb_connected || !usb_ld->usbdev)
++		return;
++
++	if (usb_ld->usbdev)
++		usb_mark_last_busy(usb_ld->usbdev);
++	switch (pipe_data->format) {
++	case IF_USB_FMT_EP:
++		if (usb_ld->if_usb_is_main) {
++			pr_urb("IPC-RX, retry", urb);
++			iod_format = IPC_FMT;
++		} else {
++			iod_format = IPC_BOOT;
++		}
++		break;
++	case IF_USB_RAW_EP:
++		iod_format = IPC_MULTI_RAW;
++		break;
++	case IF_USB_RFS_EP:
++		iod_format = IPC_RFS;
++		pr_urb("RFS-RX, retry", urb);
++		break;
++	case IF_USB_CMD_EP:
++		iod_format = IPC_CMD;
++		break;
++	default:
++		iod_format = -1;
++		break;
++	}
++
++	iod = link_get_iod_with_format(&usb_ld->ld, iod_format);
++	if (iod) {
++		ret = iod->recv(iod, &usb_ld->ld, (char *)urb->transfer_buffer,
++			urb->actual_length);
++		if (ret == -ENOMEM) {
++			/* TODO: check the retry count */
++			/* retry the delay work after 20ms and resubit*/
++			mif_err("ENOMEM, +retry 20ms\n");
++			if (usb_ld->usbdev)
++				usb_mark_last_busy(usb_ld->usbdev);
++			usb_ld->retry_urb = urb;
++			if (usb_ld->rx_retry_cnt++ < 10)
++				queue_delayed_work(usb_ld->ld.tx_wq,
++					&usb_ld->rx_retry_work,	10);
++			return;
++		}
++		if (ret < 0)
++			mif_err("io device recv error (%d)\n", ret);
++		usb_ld->rx_retry_cnt = 0;
++	}
++
++	if (usb_ld->usbdev)
++		usb_mark_last_busy(usb_ld->usbdev);
++	usb_rx_submit(usb_ld, pipe_data, GFP_ATOMIC);
++}
++
++
++static void usb_rx_complete(struct urb *urb)
++{
++	struct if_usb_devdata *pipe_data = urb->context;
++	struct usb_link_device *usb_ld = pipe_data->usb_ld;
++	struct io_device *iod;
++	int iod_format;
++	int ret;
++
++	if (usb_ld->usbdev)
++		usb_mark_last_busy(usb_ld->usbdev);
++
++	switch (urb->status) {
++	case -ENOENT:
++		/* case for 'link pm suspended but rx data had remained' */
++		mif_debug("urb->status = -ENOENT\n");
++		fallthrough;
++	case 0:
++		if (!urb->actual_length) {
++			mif_debug("urb has zero length!\n");
++			goto rx_submit;
++		}
++
++		usb_ld->link_pm_data->rx_cnt++;
++		/* call iod recv */
++		/* how we can distinguish boot ch with fmt ch ?? */
++		switch (pipe_data->format) {
++		case IF_USB_FMT_EP:
++			if (usb_ld->if_usb_is_main) {
++				pr_urb("IPC-RX", urb);
++				iod_format = IPC_FMT;
++			} else {
++				iod_format = IPC_BOOT;
++			}
++			break;
++		case IF_USB_RAW_EP:
++			iod_format = IPC_MULTI_RAW;
++			break;
++		case IF_USB_RFS_EP:
++			iod_format = IPC_RFS;
++			break;
++		case IF_USB_CMD_EP:
++			iod_format = IPC_CMD;
++			break;
++		default:
++			iod_format = -1;
++			break;
++		}
++
++		/* flow control CMD by CP, not use io device */
++		if (unlikely(iod_format == IPC_CMD)) {
++			ret = link_rx_flowctl_cmd(&usb_ld->ld,
++					(char *)urb->transfer_buffer,
++					urb->actual_length);
++			if (ret < 0)
++				mif_err("no multi raw device (%d)\n", ret);
++			goto rx_submit;
++		}
++
++		iod = link_get_iod_with_format(&usb_ld->ld, iod_format);
++		if (iod) {
++			ret = iod->recv(iod,
++					&usb_ld->ld,
++					(char *)urb->transfer_buffer,
++					urb->actual_length);
++			if (ret == -ENOMEM) {
++				/* retry the delay work and resubit*/
++				mif_err("ENOMEM, retry\n");
++				if (usb_ld->usbdev)
++					usb_mark_last_busy(usb_ld->usbdev);
++				usb_ld->retry_urb = urb;
++				queue_delayed_work(usb_ld->ld.tx_wq,
++					&usb_ld->rx_retry_work, 0);
++				return;
++			}
++			if (ret < 0)
++				mif_err("io device recv error (%d)\n", ret);
++		}
++rx_submit:
++		if (urb->status == 0) {
++			if (usb_ld->usbdev)
++				usb_mark_last_busy(usb_ld->usbdev);
++			usb_rx_submit(usb_ld, pipe_data, GFP_ATOMIC);
++		}
++		break;
++	default:
++		mif_err("urb err status = %d\n", urb->status);
++		break;
++	}
++}
++
++static int usb_send(struct link_device *ld, struct io_device *iod,
++			struct sk_buff *skb)
++{
++	struct sk_buff_head *txq;
++	size_t tx_size;
++	struct usb_link_device *usb_ld = to_usb_link_device(ld);
++	struct link_pm_data *pm_data = usb_ld->link_pm_data;
++
++	switch (iod->format) {
++	case IPC_RAW:
++		txq = &ld->sk_raw_tx_q;
++
++		if (unlikely(ld->raw_tx_suspended)) {
++			/* Unlike misc_write, vnet_xmit is in interrupt.
++			 * Despite call netif_stop_queue on CMD_SUSPEND,
++			 * packets can be reached here.
++			 */
++			if (in_hardirq()) {
++				mif_err("raw tx is suspended, "
++						"drop packet. size=%d",
++						skb->len);
++				return -EBUSY;
++			}
++
++			mif_err("wait RESUME CMD...\n");
++			reinit_completion(&ld->raw_tx_resumed_by_cp);
++			wait_for_completion(&ld->raw_tx_resumed_by_cp);
++			mif_err("resumed done.\n");
++		}
++		break;
++	case IPC_BOOT:
++	case IPC_FMT:
++	case IPC_RFS:
++	default:
++		txq = &ld->sk_fmt_tx_q;
++		break;
++	}
++	/* store the tx size before run the tx_delayed_work*/
++	tx_size = skb->len;
++
++	/* drop packet, when link is not online */
++	if (ld->com_state == COM_BOOT && iod->format != IPC_BOOT) {
++		mif_err("%s: drop packet, size=%d, com_state=%d\n",
++				iod->name, skb->len, ld->com_state);
++		dev_kfree_skb_any(skb);
++		return 0;
++	}
++
++	/* en queue skb data */
++	skb_queue_tail(txq, skb);
++	/* Hold wake_lock for getting schedule the tx_work */
++	wake_lock(&pm_data->tx_async_wake);
++
++	if (!work_pending(&ld->tx_delayed_work.work))
++		queue_delayed_work(ld->tx_wq, &ld->tx_delayed_work, 0);
++
++	return tx_size;
++}
++
++static void usb_tx_complete(struct urb *urb)
++{
++	struct sk_buff *skb = urb->context;
++	struct io_device *iod = skbpriv(skb)->iod;
++	struct link_device *ld = skbpriv(skb)->ld;
++	struct usb_link_device *usb_ld = to_usb_link_device(ld);
++
++	switch (urb->status) {
++	case 0:
++		break;
++	case -ENOENT:
++	case -ECONNRESET:
++	case -ESHUTDOWN:
++	default:
++		if (iod->format != IPC_BOOT)
++			mif_info("TX error (%d)\n", urb->status);
++	}
++
++	dev_kfree_skb_any(skb);
++	if (urb->dev && usb_ld->if_usb_connected)
++		usb_mark_last_busy(urb->dev);
++	usb_free_urb(urb);
++}
++
++/* Even if usb_tx_urb_with_skb is failed, does not release the skb to retry */
++static int usb_tx_urb_with_skb(struct usb_device *usbdev, struct sk_buff *skb,
++					struct if_usb_devdata *pipe_data)
++{
++	int ret;
++	struct urb *urb;
++
++	if (pipe_data->disconnected)
++		return -ENOENT;
++
++	urb = usb_alloc_urb(0, GFP_KERNEL);
++	if (!urb) {
++		mif_err("alloc urb error\n");
++		return -ENOMEM;
++	}
++
++	urb->transfer_flags = URB_ZERO_PACKET;
++	usb_fill_bulk_urb(urb, pipe_data->usbdev, pipe_data->tx_pipe, skb->data,
++			skb->len, usb_tx_complete, (void *)skb);
++
++	usb_mark_last_busy(usbdev);
++	ret = usb_submit_urb(urb, GFP_KERNEL);
++	if (ret < 0) {
++		mif_err("usb_submit_urb with ret(%d)\n", ret);
++		usb_free_urb(urb);
++		return ret;
++	}
++	return 0;
++}
++
++
++static int _usb_tx_work(struct sk_buff *skb)
++{
++	struct sk_buff_head *txq;
++	struct io_device *iod = skbpriv(skb)->iod;
++	struct link_device *ld = skbpriv(skb)->ld;
++	struct usb_link_device *usb_ld = to_usb_link_device(ld);
++	struct if_usb_devdata *pipe_data;
++
++	switch (iod->format) {
++	case IPC_BOOT:
++	case IPC_FMT:
++		/* boot device uses same intf with fmt*/
++		pipe_data = &usb_ld->devdata[IF_USB_FMT_EP];
++		txq = &ld->sk_fmt_tx_q;
++		break;
++	case IPC_RAW:
++		pipe_data = &usb_ld->devdata[IF_USB_RAW_EP];
++		txq = &ld->sk_raw_tx_q;
++		break;
++	case IPC_RFS:
++		pipe_data = &usb_ld->devdata[IF_USB_RFS_EP];
++		txq = &ld->sk_fmt_tx_q;
++		break;
++	default:
++		/* wrong packet, drop it */
++		pipe_data =  NULL;
++		txq = NULL;
++		break;
++	}
++
++	if (!pipe_data)
++		return -ENOENT;
++
++	if (iod->format == IPC_FMT && usb_ld->if_usb_is_main)
++		pr_skb("IPC-TX", skb);
++
++	if (iod->format == IPC_RAW)
++		mif_debug("TX[RAW]\n");
++
++	return usb_tx_urb_with_skb(usb_ld->usbdev, skb,	pipe_data);
++}
++
++
++static void usb_tx_work(struct work_struct *work)
++{
++	int ret = 0;
++	struct link_device *ld =
++		container_of(work, struct link_device, tx_delayed_work.work);
++	struct usb_link_device *usb_ld = to_usb_link_device(ld);
++	struct sk_buff *skb;
++	struct link_pm_data *pm_data = usb_ld->link_pm_data;
++
++	if (!usb_ld->usbdev) {
++		mif_info("usbdev is invalid\n");
++		return;
++	}
++
++	pm_data->tx_cnt++;
++
++	while (ld->sk_fmt_tx_q.qlen || ld->sk_raw_tx_q.qlen) {
++		/* request and check usb runtime pm first */
++		ret = link_pm_runtime_get_active(pm_data);
++		if (ret < 0) {
++			if (ret == -ENODEV) {
++				mif_err("link not avail, retry reconnect.\n");
++				goto exit;
++			}
++			goto retry_tx_work;
++		}
++
++		/* If AP try to tx when interface disconnect->reconnect probe,
++		 * usbdev was created but one of interface channel device are
++		 * probing, _usb_tx_work return to -ENOENT then runtime usage
++		 * count allways positive and never enter to L2
++		 */
++		if (!usb_ld->if_usb_connected) {
++			mif_info("link is available, but if  was not readey\n");
++			goto retry_tx_work;
++		}
++		pm_runtime_get_sync(&usb_ld->usbdev->dev);
++
++		ret = 0;
++		/* send skb from fmt_txq and raw_txq,*/
++		/* one by one for fair flow control */
++		skb = skb_dequeue(&ld->sk_fmt_tx_q);
++		if (skb)
++			ret = _usb_tx_work(skb);
++
++		if (ret) {
++			mif_err("usb_tx_urb_with_skb for fmt_q %d\n", ret);
++			skb_queue_head(&ld->sk_fmt_tx_q, skb);
++
++			if (ret == -ENODEV || ret == -ENOENT)
++				goto exit;
++
++			/* tx fail and usbdev alived, retry tx work */
++			pm_runtime_put(&usb_ld->usbdev->dev);
++			goto retry_tx_work;
++		}
++
++		skb = skb_dequeue(&ld->sk_raw_tx_q);
++		if (skb)
++			ret = _usb_tx_work(skb);
++
++		if (ret) {
++			mif_err("usb_tx_urb_with_skb for raw_q %d\n", ret);
++			skb_queue_head(&ld->sk_raw_tx_q, skb);
++
++			if (ret == -ENODEV || ret == -ENOENT)
++				goto exit;
++
++			pm_runtime_put(&usb_ld->usbdev->dev);
++			goto retry_tx_work;
++		}
++
++		pm_runtime_put(&usb_ld->usbdev->dev);
++	}
++	wake_unlock(&pm_data->tx_async_wake);
++exit:
++	return;
++
++retry_tx_work:
++	queue_delayed_work(ld->tx_wq, &ld->tx_delayed_work,
++		msecs_to_jiffies(20));
++	return;
++}
++
++/*
++#ifdef CONFIG_LINK_PM
++*/
++
++static int link_pm_runtime_get_active(struct link_pm_data *pm_data)
++{
++	int ret;
++	struct usb_link_device *usb_ld = pm_data->usb_ld;
++	struct device *dev = &usb_ld->usbdev->dev;
++
++	if (!usb_ld->if_usb_connected || usb_ld->ld.com_state == COM_NONE)
++		return -ENODEV;
++
++	if (pm_data->dpm_suspending) {
++		mif_err("Kernel in suspending try get_active later\n");
++		/* during dpm_suspending..
++		 * if AP get tx data, wake up. */
++		wake_lock(&pm_data->l2_wake);
++		return -EAGAIN;
++	}
++
++	if (dev->power.runtime_status == RPM_ACTIVE) {
++		pm_data->resume_retry_cnt = 0;
++		return 0;
++	}
++
++	if (!pm_data->resume_requested) {
++		mif_debug("QW PM\n");
++		queue_delayed_work(pm_data->wq, &pm_data->link_pm_work, 0);
++	}
++	mif_debug("Wait pm\n");
++	reinit_completion(&pm_data->active_done);
++	ret = wait_for_completion_timeout(&pm_data->active_done,
++						msecs_to_jiffies(500));
++
++	/* If usb link was disconnected while waiting ACTIVE State, usb device
++	 * was removed, usb_ld->usbdev->dev is invalid and below
++	 * dev->power.runtime_status is also invalid address.
++	 * It will be occured LPA L3 -> AP iniated L0 -> disconnect -> link
++	 * timeout
++	 */
++	if (!usb_ld->if_usb_connected || usb_ld->ld.com_state == COM_NONE) {
++		mif_info("link disconnected after timed-out\n");
++		return -ENODEV;
++	}
++
++	if (dev->power.runtime_status != RPM_ACTIVE) {
++		mif_info("link_active (%d) retry\n",
++						dev->power.runtime_status);
++		return -EAGAIN;
++	}
++	mif_debug("link_active success(%d)\n", ret);
++	return 0;
++}
++
++static void link_pm_runtime_start(struct work_struct *work)
++{
++	struct link_pm_data *pm_data =
++		container_of(work, struct link_pm_data, link_pm_start.work);
++	struct usb_device *usbdev = pm_data->usb_ld->usbdev;
++	struct device *dev, *hdev;
++	struct link_device *ld = &pm_data->usb_ld->ld;
++
++	if (!pm_data->usb_ld->if_usb_connected
++		|| pm_data->usb_ld->ld.com_state == COM_NONE) {
++		mif_debug("disconnect status, ignore\n");
++		return;
++	}
++
++	dev = &pm_data->usb_ld->usbdev->dev;
++
++	/* wait interface driver resumming */
++	if (dev->power.runtime_status == RPM_SUSPENDED) {
++		mif_info("suspended yet, delayed work\n");
++		queue_delayed_work(pm_data->wq, &pm_data->link_pm_start,
++			msecs_to_jiffies(20));
++		return;
++	}
++
++	if (pm_data->usb_ld->usbdev && dev->parent) {
++		mif_info("rpm_status: %d\n",
++			dev->power.runtime_status);
++		pm_runtime_set_autosuspend_delay(dev, 200);
++		hdev = usbdev->bus->root_hub->dev.parent;
++		mif_info("EHCI runtime %s, %s\n", dev_driver_string(hdev),
++			dev_name(hdev));
++		pm_runtime_allow(dev);
++		pm_runtime_allow(hdev);/*ehci*/
++		pm_data->link_pm_active = true;
++		pm_data->resume_requested = false;
++		pm_data->link_reconnect_cnt = 5;
++		pm_data->resume_retry_cnt = 0;
++
++		/* retry prvious link tx q */
++		queue_delayed_work(ld->tx_wq, &ld->tx_delayed_work, 0);
++	}
++}
++
++static void __maybe_unused link_pm_force_cp_dump(struct link_pm_data *pm_data)
++{
++	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
++
++	mif_err("Set modem crash ap_dump_int by %pS\n",
++		__builtin_return_address(0));
++
++	if (mc->gpio_ap_dump_int) {
++		if (gpio_get_value(mc->gpio_ap_dump_int)) {
++			gpio_set_value(mc->gpio_ap_dump_int, 0);
++			msleep(20);
++		}
++		gpio_set_value(mc->gpio_ap_dump_int, 1);
++		msleep(20);
++		mif_err("AP_DUMP_INT(%d)\n",
++			gpio_get_value(mc->gpio_ap_dump_int));
++		gpio_set_value(mc->gpio_ap_dump_int, 0);
++	}
++}
++
++static void link_pm_change_modem_state(struct link_pm_data *pm_data,
++						enum modem_state state)
++{
++	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
++
++	if (!mc->iod || pm_data->usb_ld->ld.com_state != COM_ONLINE)
++		return;
++
++	mif_err("set modem state %d by %pS\n", state,
++		__builtin_return_address(0));
++	mc->iod->modem_state_changed(mc->iod, state);
++	mc->bootd->modem_state_changed(mc->bootd, state);
++}
++
++static void link_pm_reconnect_work(struct work_struct *work)
++{
++	struct link_pm_data *pm_data =
++		container_of(work, struct link_pm_data,
++					link_reconnect_work.work);
++	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
++
++	if (!mc || pm_data->usb_ld->if_usb_connected)
++		return;
++
++	if (pm_data->usb_ld->ld.com_state != COM_ONLINE)
++		return;
++
++	if (pm_data->link_reconnect_cnt--) {
++		if (mc->phone_state == STATE_ONLINE &&
++						!pm_data->link_reconnect())
++			/* try reconnect and check */
++			schedule_delayed_work(&pm_data->link_reconnect_work,
++							msecs_to_jiffies(500));
++		else	/* under cp crash or reset, just return */
++			return;
++	} else {
++		/* try to recover cp */
++		mif_err("recover connection: silent reset\n");
++		link_pm_change_modem_state(pm_data, STATE_CRASH_RESET);
++	}
++}
++
++static inline int link_pm_slave_wake(struct link_pm_data *pm_data)
++{
++	int spin = 20;
++
++	/* when slave device is in sleep, wake up slave cpu first */
++	if (gpio_get_value(pm_data->gpio_link_hostwake)
++				!= HOSTWAKE_TRIGLEVEL) {
++		if (gpio_get_value(pm_data->gpio_link_slavewake)) {
++			gpio_set_value(pm_data->gpio_link_slavewake, 0);
++			mif_info("gpio [SWK] set [0]\n");
++			mdelay(5);
++		}
++		gpio_set_value(pm_data->gpio_link_slavewake, 1);
++		mif_info("gpio [SWK] set [1]\n");
++		mdelay(5);
++
++		/* wait host wake signal*/
++		while (spin-- && gpio_get_value(pm_data->gpio_link_hostwake) !=
++							HOSTWAKE_TRIGLEVEL)
++			mdelay(5);
++	}
++	return spin;
++}
++
++static void link_pm_runtime_work(struct work_struct *work)
++{
++	int ret;
++	struct link_pm_data *pm_data =
++		container_of(work, struct link_pm_data, link_pm_work.work);
++	struct device *dev = &pm_data->usb_ld->usbdev->dev;
++
++	if (!pm_data->usb_ld->if_usb_connected || pm_data->dpm_suspending)
++		return;
++
++	if (pm_data->usb_ld->ld.com_state == COM_NONE)
++		return;
++
++	mif_debug("for dev 0x%p : current %d\n", dev,
++					dev->power.runtime_status);
++
++	switch (dev->power.runtime_status) {
++	case RPM_ACTIVE:
++		pm_data->resume_retry_cnt = 0;
++		pm_data->resume_requested = false;
++		complete(&pm_data->active_done);
++
++		return;
++	case RPM_SUSPENDED:
++		if (pm_data->resume_requested)
++			break;
++		pm_data->resume_requested = true;
++		wake_lock(&pm_data->rpm_wake);
++		ret = link_pm_slave_wake(pm_data);
++		if (ret < 0) {
++			mif_err("slave wake fail\n");
++			wake_unlock(&pm_data->rpm_wake);
++			break;
++		}
++
++		if (!pm_data->usb_ld->if_usb_connected) {
++			wake_unlock(&pm_data->rpm_wake);
++			return;
++		}
++
++		ret = pm_runtime_resume(dev);
++		if (ret < 0) {
++			mif_err("resume error(%d)\n", ret);
++			if (!pm_data->usb_ld->if_usb_connected) {
++				wake_unlock(&pm_data->rpm_wake);
++				return;
++			}
++			/* force to go runtime idle before retry resume */
++			if (dev->power.timer_expires == 0 &&
++						!dev->power.request_pending) {
++				mif_debug("run time idle\n");
++				pm_runtime_idle(dev);
++			}
++		}
++		wake_unlock(&pm_data->rpm_wake);
++		break;
++	case RPM_SUSPENDING:
++		/* Checking the usb_runtime_suspend running time.*/
++		mif_info("rpm_states=%d", dev->power.runtime_status);
++		msleep(20);
++		break;
++	default:
++		break;
++	}
++	pm_data->resume_requested = false;
++
++	/* check until runtime_status goes to active */
++	/* attemp 10 times, or re-establish modem-link */
++	/* if pm_runtime_resume run properly, rpm status must be in ACTIVE */
++	if (dev->power.runtime_status == RPM_ACTIVE) {
++		pm_data->resume_retry_cnt = 0;
++		complete(&pm_data->active_done);
++	} else if (pm_data->resume_retry_cnt++ > 10) {
++		mif_err("runtime_status(%d), retry_cnt(%d)\n",
++			dev->power.runtime_status, pm_data->resume_retry_cnt);
++		link_pm_change_modem_state(pm_data, STATE_CRASH_RESET);
++	} else
++		queue_delayed_work(pm_data->wq, &pm_data->link_pm_work,
++							msecs_to_jiffies(20));
++}
++
++static irqreturn_t link_pm_irq_handler(int irq, void *data)
++{
++	int value;
++	struct link_pm_data *pm_data = data;
++
++#if defined(CONFIG_SLP)
++	pm_wakeup_event(pm_data->miscdev.this_device, 0);
++#endif
++
++	if (!pm_data->link_pm_active)
++		return IRQ_HANDLED;
++
++	/* host wake up HIGH */
++	/*
++		resume usb runtime pm start
++	*/
++	/* host wake up LOW */
++	/*
++		slave usb enumeration end,
++		host can send usb packet after
++		runtime pm status changes to ACTIVE
++	*/
++	value = gpio_get_value(pm_data->gpio_link_hostwake);
++	mif_info("gpio [HWK] get [%d]\n", value);
++
++	/*
++	* igonore host wakeup interrupt at suspending kernel
++	*/
++	if (pm_data->dpm_suspending) {
++		mif_info("ignore request by suspending\n");
++		/* Ignore HWK but AP got to L2 by suspending fail */
++		wake_lock(&pm_data->l2_wake);
++		return IRQ_HANDLED;
++	}
++
++	if (value == HOSTWAKE_TRIGLEVEL) {
++		/* move to slave wake function */
++		/* runtime pm goes to active */
++		/*
++		if (gpio_get_value(pm_data->gpio_link_active)) {
++			mif_err("gpio [H ACTV : %d] set 1\n",
++				gpio_get_value(pm_data->gpio_link_active));
++			gpio_set_value(pm_data->gpio_link_active, 1);
++		}
++		*/
++		queue_delayed_work(pm_data->wq, &pm_data->link_pm_work, 0);
++	} else {
++		/* notification of enumeration process from slave device
++		 * But it does not mean whole connection is in resume, so do not
++		 * notify resume completion here.
++
++		if (pm_data->link_pm_active && !pm_data->active_done.done)
++			complete(&pm_data->active_done);
++		*/
++		/* clear slave cpu wake up pin */
++		gpio_set_value(pm_data->gpio_link_slavewake, 0);
++		mif_debug("gpio [SWK] set [0]\n");
++	}
++	return IRQ_HANDLED;
++}
++
++static long link_pm_ioctl(struct file *file, unsigned int cmd,
++						unsigned long arg)
++{
++	int value;
++	struct link_pm_data *pm_data = file->private_data;
++	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
++
++	mif_info("%x\n", cmd);
++
++	switch (cmd) {
++	case IOCTL_LINK_CONTROL_ENABLE:
++		if (copy_from_user(&value, (const void __user *)arg,
++							sizeof(int)))
++			return -EFAULT;
++		if (pm_data->link_ldo_enable)
++			pm_data->link_ldo_enable(!!value);
++		if (pm_data->gpio_link_enable)
++			gpio_set_value(pm_data->gpio_link_enable, value);
++		break;
++	case IOCTL_LINK_CONTROL_ACTIVE:
++		if (copy_from_user(&value, (const void __user *)arg,
++							sizeof(int)))
++			return -EFAULT;
++		gpio_set_value(pm_data->gpio_link_active, value);
++		break;
++	case IOCTL_LINK_GET_HOSTWAKE:
++		return !gpio_get_value(pm_data->gpio_link_hostwake);
++	case IOCTL_LINK_CONNECTED:
++		return pm_data->usb_ld->if_usb_connected;
++	case IOCTL_LINK_SET_BIAS_CLEAR:
++		if (copy_from_user(&value, (const void __user *)arg,
++							sizeof(int)))
++			return -EFAULT;
++		if (value) {
++			gpio_direction_output(pm_data->gpio_link_slavewake, 0);
++			gpio_direction_output(pm_data->gpio_link_hostwake, 0);
++		} else {
++			gpio_direction_output(pm_data->gpio_link_slavewake, 0);
++			gpio_direction_input(pm_data->gpio_link_hostwake);
++			irq_set_irq_type(pm_data->irq_link_hostwake,
++				IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING);
++		}
++		fallthrough;
++	case IOCTL_LINK_GET_PHONEACTIVE:
++		return gpio_get_value(mc->gpio_phone_active);
++	default:
++		break;
++	}
++
++	return 0;
++}
++
++static int link_pm_open(struct inode *inode, struct file *file)
++{
++	struct link_pm_data *pm_data =
++		(struct link_pm_data *)file->private_data;
++	file->private_data = (void *)pm_data;
++	return 0;
++}
++
++static int link_pm_release(struct inode *inode, struct file *file)
++{
++	file->private_data = NULL;
++	return 0;
++}
++
++static const struct file_operations link_pm_fops = {
++	.owner = THIS_MODULE,
++	.open = link_pm_open,
++	.release = link_pm_release,
++	.unlocked_ioctl = link_pm_ioctl,
++};
++
++static int link_pm_notifier_event(struct notifier_block *this,
++				unsigned long event, void *ptr)
++{
++	struct link_pm_data *pm_data =
++			container_of(this, struct link_pm_data,	pm_notifier);
++	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
++
++	switch (event) {
++	case PM_SUSPEND_PREPARE:
++#ifdef CONFIG_HIBERNATION
++	case PM_HIBERNATION_PREPARE:
++	case PM_RESTORE_PREPARE:
++#endif
++		pm_data->dpm_suspending = true;
++		/* set PDA Active High if previous state was LPA */
++		if (!gpio_get_value(pm_data->gpio_link_active)) {
++			mif_info("PDA active High to LPA suspend spot\n");
++			gpio_set_value(mc->gpio_pda_active, 1);
++		}
++		mif_debug("dpm suspending set to true\n");
++		return NOTIFY_OK;
++	case PM_POST_SUSPEND:
++#ifdef CONFIG_HIBERNATION
++	case PM_POST_HIBERNATION:
++	case PM_POST_RESTORE:
++#endif
++		pm_data->dpm_suspending = false;
++		if (gpio_get_value(pm_data->gpio_link_hostwake)
++			== HOSTWAKE_TRIGLEVEL) {
++			queue_delayed_work(pm_data->wq, &pm_data->link_pm_work,
++				0);
++			mif_info("post resume\n");
++		} else {
++		/* LPA to Kernel suspend and User Freezing task fail resume,
++		restore to LPA GPIO states. */
++			if (!gpio_get_value(pm_data->gpio_link_active)) {
++				mif_info("PDA active low to LPA GPIO state\n");
++				gpio_set_value(mc->gpio_pda_active, 0);
++			}
++		}
++		mif_debug("dpm suspending set to false\n");
++		return NOTIFY_OK;
++	}
++	return NOTIFY_DONE;
++}
++
++static struct modem_ctl *if_usb_get_modemctl(struct link_pm_data *pm_data)
++{
++	struct io_device *iod;
++
++	iod = link_get_iod_with_format(&pm_data->usb_ld->ld, IPC_FMT);
++	if (!iod) {
++		mif_err("no iodevice for modem control\n");
++		return NULL;
++	}
++
++	return iod->mc;
++}
++
++static int if_usb_suspend(struct usb_interface *intf, pm_message_t message)
++{
++	struct if_usb_devdata *devdata = usb_get_intfdata(intf);
++	struct link_pm_data *pm_data = devdata->usb_ld->link_pm_data;
++	if (!devdata->disconnected && devdata->state == STATE_RESUMED) {
++		usb_kill_urb(devdata->urb);
++		devdata->state = STATE_SUSPENDED;
++	}
++
++	devdata->usb_ld->suspended++;
++
++	if (devdata->usb_ld->suspended == LINKPM_DEV_NUM) {
++		mif_debug("[if_usb_suspended]\n");
++		wake_lock_timeout(&pm_data->l2_wake, msecs_to_jiffies(50));
++#ifdef	CONFIG_SLP
++		pm_wakeup_event(pm_data->miscdev.this_device,
++				msecs_to_jiffies(20));
++#endif
++		/* XMM6262 Host wakeup toggle recovery */
++		if (!pm_data->rx_cnt && !pm_data->tx_cnt) {
++			if (pm_data->ipc_debug_cnt++ > 10) {
++				mif_err("No TX/RX after resume 10times\n");
++				link_pm_change_modem_state(pm_data,
++					STATE_CRASH_RESET);
++			}
++		} else {
++			pm_data->ipc_debug_cnt = 0;
++			pm_data->rx_cnt = 0;
++			pm_data->tx_cnt = 0;
++		}
++	}
++	return 0;
++}
++
++static int if_usb_resume(struct usb_interface *intf)
++{
++	int ret;
++	struct if_usb_devdata *devdata = usb_get_intfdata(intf);
++	struct link_pm_data *pm_data = devdata->usb_ld->link_pm_data;
++
++	if (!devdata->disconnected && devdata->state == STATE_SUSPENDED) {
++		ret = usb_rx_submit(devdata->usb_ld, devdata, GFP_ATOMIC);
++		if (ret < 0) {
++			mif_err("usb_rx_submit error with (%d)\n", ret);
++			return ret;
++		}
++		devdata->state = STATE_RESUMED;
++	}
++
++	/* For debugging -  nomal case, never reach below... */
++	if (pm_data->resume_retry_cnt > 5) {
++		mif_err("retry_cnt=%d, rpm_status=%d",
++			pm_data->resume_retry_cnt,
++			devdata->usb_ld->usbdev->dev.power.runtime_status);
++		pm_data->resume_retry_cnt = 0;
++	}
++
++	devdata->usb_ld->suspended--;
++	if (!devdata->usb_ld->suspended) {
++		mif_debug("[if_usb_resumed]\n");
++		wake_lock(&pm_data->l2_wake);
++	}
++
++	return 0;
++}
++
++static int if_usb_reset_resume(struct usb_interface *intf)
++{
++	int ret;
++	struct if_usb_devdata *devdata = usb_get_intfdata(intf);
++	struct link_pm_data *pm_data = devdata->usb_ld->link_pm_data;
++
++	ret = if_usb_resume(intf);
++	pm_data->ipc_debug_cnt = 0;
++	/*
++	 * for runtime suspend, kick runtime pm at L3 -> L0 reset resume
++	*/
++	if (!devdata->usb_ld->suspended)
++		queue_delayed_work(pm_data->wq, &pm_data->link_pm_start, 0);
++	return ret;
++}
++
++static void if_usb_disconnect(struct usb_interface *intf)
++{
++	struct if_usb_devdata *devdata = usb_get_intfdata(intf);
++	struct link_pm_data *pm_data = devdata->usb_ld->link_pm_data;
++	struct device *hdev;
++	struct link_device *ld = &devdata->usb_ld->ld;
++
++	mif_info("\n");
++
++	if (devdata->disconnected)
++		return;
++
++	devdata->usb_ld->if_usb_connected = 0;
++
++	usb_driver_release_interface(&if_usb_driver, intf);
++
++	usb_kill_urb(devdata->urb);
++
++	hdev = devdata->usbdev->bus->root_hub->dev.parent;
++	pm_runtime_forbid(hdev); /*ehci*/
++
++	mif_info("put dev 0x%p\n", devdata->usbdev);
++	usb_put_dev(devdata->usbdev);
++
++	devdata->data_intf = NULL;
++	devdata->usbdev = NULL;
++	/* if possible, merge below 2 variables */
++	devdata->disconnected = 1;
++	devdata->state = STATE_SUSPENDED;
++	pm_data->ipc_debug_cnt = 0;
++
++	devdata->usb_ld->suspended = 0;
++	wake_lock(&pm_data->boot_wake);
++
++	usb_set_intfdata(intf, NULL);
++
++	/* cancel runtime start delayed works */
++	cancel_delayed_work_sync(&pm_data->link_pm_start);
++	cancel_delayed_work_sync(&ld->tx_delayed_work);
++
++	/* if reconnect function exist , try reconnect without reset modem
++	 * reconnect function checks modem is under crash or not, so we don't
++	 * need check crash state here. reconnect work checks and determine
++	 * further works
++	 */
++	if (!pm_data->link_reconnect)
++		return;
++
++	if (devdata->usb_ld->ld.com_state != COM_ONLINE) {
++		cancel_delayed_work(&pm_data->link_reconnect_work);
++		return;
++	} else {
++		if (pm_data->ehci_reg_dump)
++			pm_data->ehci_reg_dump(hdev);
++		schedule_delayed_work(&pm_data->link_reconnect_work,
++							msecs_to_jiffies(500));
++	}
++	return;
++}
++
++static int if_usb_set_pipe(struct usb_link_device *usb_ld,
++			const struct usb_host_interface *desc, int pipe)
++{
++	if (pipe < 0 || pipe >= IF_USB_DEVNUM_MAX) {
++		mif_err("undefined endpoint, exceed max\n");
++		return -EINVAL;
++	}
++
++	mif_info("set %d\n", pipe);
++
++	if ((usb_pipein(desc->endpoint[0].desc.bEndpointAddress)) &&
++	    (usb_pipeout(desc->endpoint[1].desc.bEndpointAddress))) {
++		usb_ld->devdata[pipe].rx_pipe = usb_rcvbulkpipe(usb_ld->usbdev,
++				desc->endpoint[0].desc.bEndpointAddress);
++		usb_ld->devdata[pipe].tx_pipe = usb_sndbulkpipe(usb_ld->usbdev,
++				desc->endpoint[1].desc.bEndpointAddress);
++	} else if ((usb_pipeout(desc->endpoint[0].desc.bEndpointAddress)) &&
++		   (usb_pipein(desc->endpoint[1].desc.bEndpointAddress))) {
++		usb_ld->devdata[pipe].rx_pipe = usb_rcvbulkpipe(usb_ld->usbdev,
++				desc->endpoint[1].desc.bEndpointAddress);
++		usb_ld->devdata[pipe].tx_pipe = usb_sndbulkpipe(usb_ld->usbdev,
++				desc->endpoint[0].desc.bEndpointAddress);
++	} else {
++		mif_err("undefined endpoint\n");
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int if_usb_probe(struct usb_interface *intf,
++					const struct usb_device_id *id)
++{
++	int err;
++	int pipe;
++	const struct usb_cdc_union_desc *union_hdr;
++	const struct usb_host_interface *data_desc;
++	unsigned char *buf = intf->altsetting->extra;
++	int buflen = intf->altsetting->extralen;
++	struct usb_interface *data_intf;
++	struct usb_device *usbdev = interface_to_usbdev(intf);
++	struct usb_driver *usbdrv = &if_usb_driver;
++	struct usb_id_info *info = (struct usb_id_info *)id->driver_info;
++	struct usb_link_device *usb_ld = info->usb_ld;
++
++	mif_info("usbdev = 0x%p\n", usbdev);
++
++	pr_debug("%s: Class=%d, SubClass=%d, Protocol=%d\n", __func__,
++		intf->altsetting->desc.bInterfaceClass,
++		intf->altsetting->desc.bInterfaceSubClass,
++		intf->altsetting->desc.bInterfaceProtocol);
++
++	/* if usb disconnected, AP try to reconnect 5 times.
++	 * but because if_sub_connected is configured
++	 * at the end of if_usb_probe, there was a chance
++	 * that swk will be called again during enumeration.
++	 * so.. cancel reconnect work_queue in this case. */
++	if (usb_ld->ld.com_state == COM_ONLINE)
++		cancel_delayed_work(&usb_ld->link_pm_data->link_reconnect_work);
++
++	usb_ld->usbdev = usbdev;
++	pm_runtime_forbid(&usbdev->dev);
++	usb_ld->link_pm_data->link_pm_active = false;
++	usb_ld->link_pm_data->dpm_suspending = false;
++	usb_ld->link_pm_data->ipc_debug_cnt = 0;
++	usb_ld->if_usb_is_main = (info->intf_id != BOOT_DOWN);
++
++	union_hdr = NULL;
++	/* for WMC-ACM compatibility, WMC-ACM use an end-point for control msg*/
++	if (intf->altsetting->desc.bInterfaceSubClass != USB_CDC_SUBCLASS_ACM) {
++		mif_err("ignore Non ACM end-point\n");
++		return -EINVAL;
++	}
++
++	if (!buflen) {
++		if (intf->cur_altsetting->endpoint->extralen &&
++				    intf->cur_altsetting->endpoint->extra) {
++			buflen = intf->cur_altsetting->endpoint->extralen;
++			buf = intf->cur_altsetting->endpoint->extra;
++		} else {
++			mif_err("Zero len descriptor reference\n");
++			return -EINVAL;
++		}
++	}
++
++	while (buflen > 0) {
++		if (buf[1] == USB_DT_CS_INTERFACE) {
++			switch (buf[2]) {
++			case USB_CDC_UNION_TYPE:
++				if (union_hdr)
++					break;
++				union_hdr = (struct usb_cdc_union_desc *)buf;
++				break;
++			default:
++				break;
++			}
++		}
++		buf += buf[0];
++		buflen -= buf[0];
++	}
++
++	if (!union_hdr) {
++		mif_err("USB CDC is not union type\n");
++		return -EINVAL;
++	}
++
++	data_intf = usb_ifnum_to_if(usbdev, union_hdr->bSlaveInterface0);
++	if (!data_intf) {
++		mif_err("data_inferface is NULL\n");
++		return -ENODEV;
++	}
++
++	data_desc = data_intf->altsetting;
++	if (!data_desc) {
++		mif_err("data_desc is NULL\n");
++		return -ENODEV;
++	}
++
++	switch (info->intf_id) {
++	case BOOT_DOWN:
++		pipe = IF_USB_BOOT_EP;
++		usb_ld->ld.com_state = COM_BOOT;
++		/* purge previous boot fmt/raw tx q
++		 clear all tx q*/
++		skb_queue_purge(&usb_ld->ld.sk_fmt_tx_q);
++		skb_queue_purge(&usb_ld->ld.sk_raw_tx_q);
++		break;
++	case IPC_CHANNEL:
++		pipe = intf->altsetting->desc.bInterfaceNumber / 2;
++		usb_ld->ld.com_state = COM_ONLINE;
++		break;
++	default:
++		pipe = -1;
++		break;
++	}
++
++	if (if_usb_set_pipe(usb_ld, data_desc, pipe) < 0)
++		return -EINVAL;
++
++	usb_ld->devdata[pipe].usbdev = usb_get_dev(usbdev);
++	mif_info("devdata usbdev = 0x%p\n",
++		usb_ld->devdata[pipe].usbdev);
++	usb_ld->devdata[pipe].usb_ld = usb_ld;
++	usb_ld->devdata[pipe].data_intf = data_intf;
++	usb_ld->devdata[pipe].format = pipe;
++	usb_ld->devdata[pipe].disconnected = 0;
++	usb_ld->devdata[pipe].state = STATE_RESUMED;
++
++	usb_ld->suspended = 0;
++
++	err = usb_driver_claim_interface(usbdrv, data_intf,
++		(void *)&usb_ld->devdata[pipe]);
++	if (err < 0) {
++		mif_err("usb_driver_claim() failed\n");
++		return err;
++	}
++
++	pm_suspend_ignore_children(&usbdev->dev, true);
++
++	usb_set_intfdata(intf, (void *)&usb_ld->devdata[pipe]);
++
++	/* rx start for this endpoint */
++	usb_rx_submit(usb_ld, &usb_ld->devdata[pipe], GFP_KERNEL);
++
++	if (info->intf_id == IPC_CHANNEL &&
++		!work_pending(&usb_ld->link_pm_data->link_pm_start.work)) {
++			queue_delayed_work(usb_ld->link_pm_data->wq,
++					&usb_ld->link_pm_data->link_pm_start,
++					msecs_to_jiffies(500));
++			wake_lock(&usb_ld->link_pm_data->l2_wake);
++			wake_unlock(&usb_ld->link_pm_data->boot_wake);
++	}
++
++	/* HSIC main comm channel has been established */
++	if (pipe == IF_USB_CMD_EP)
++		link_pm_change_modem_state(usb_ld->link_pm_data, STATE_ONLINE);
++
++	if (pipe == IF_USB_CMD_EP || info->intf_id == BOOT_DOWN)
++		usb_ld->if_usb_connected = 1;
++
++	mif_info("successfully done\n");
++
++	return 0;
++}
++
++static void if_usb_free_pipe_data(struct usb_link_device *usb_ld)
++{
++	int i;
++	for (i = 0; i < IF_USB_DEVNUM_MAX; i++) {
++		kfree(usb_ld->devdata[i].rx_buf);
++		usb_kill_urb(usb_ld->devdata[i].urb);
++	}
++}
++
++static struct usb_id_info hsic_boot_down_info = {
++	.intf_id = BOOT_DOWN,
++};
++static struct usb_id_info hsic_channel_info = {
++	.intf_id = IPC_CHANNEL,
++};
++
++static struct usb_device_id if_usb_ids[] = {
++	{USB_DEVICE_AND_INTERFACE_INFO(IMC_BOOT_VID, IMC_BOOT_PID,
++		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, USB_CDC_PROTO_NONE),
++	.driver_info = (unsigned long)&hsic_boot_down_info,},
++	{USB_DEVICE_AND_INTERFACE_INFO(IMC_MAIN_VID, IMC_MAIN_PID,
++		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, 1),
++	.driver_info = (unsigned long)&hsic_channel_info,},
++	{USB_DEVICE(STE_BOOT_VID, STE_BOOT_PID),
++	.driver_info = (unsigned long)&hsic_boot_down_info,},
++	{USB_DEVICE(STE_MAIN_VID, STE_MAIN_PID),
++	.driver_info = (unsigned long)&hsic_channel_info,},
++	{}
++};
++MODULE_DEVICE_TABLE(usb, if_usb_ids);
++
++static struct usb_driver if_usb_driver = {
++	.name =		"cdc_modem",
++	.probe =		if_usb_probe,
++	.disconnect =	if_usb_disconnect,
++	.id_table =	if_usb_ids,
++	.suspend =	if_usb_suspend,
++	.resume =	if_usb_resume,
++	.reset_resume =	if_usb_reset_resume,
++	.supports_autosuspend = 1,
++};
++
++static int if_usb_init(struct link_device *ld)
++{
++	int ret;
++	int i;
++	struct usb_link_device *usb_ld = to_usb_link_device(ld);
++	struct if_usb_devdata *pipe_data;
++	struct usb_id_info *id_info;
++
++	/* to connect usb link device with usb interface driver */
++	for (i = 0; i < ARRAY_SIZE(if_usb_ids); i++) {
++		id_info = (struct usb_id_info *)if_usb_ids[i].driver_info;
++		if (id_info)
++			id_info->usb_ld = usb_ld;
++	}
++
++	ret = usb_register(&if_usb_driver);
++	if (ret) {
++		mif_err("usb_register_driver() fail : %d\n", ret);
++		return ret;
++	}
++
++	/* allocate rx buffer for usb receive */
++	for (i = 0; i < IF_USB_DEVNUM_MAX; i++) {
++		pipe_data = &usb_ld->devdata[i];
++		pipe_data->format = i;
++		pipe_data->rx_buf_size = 16 * 1024;
++
++		pipe_data->rx_buf = kmalloc(pipe_data->rx_buf_size,
++						GFP_KERNEL);
++		if (!pipe_data->rx_buf) {
++			if_usb_free_pipe_data(usb_ld);
++			ret = -ENOMEM;
++			break;
++		}
++
++		pipe_data->urb = usb_alloc_urb(0, GFP_KERNEL);
++		if (!pipe_data->urb) {
++			mif_err("alloc urb fail\n");
++			if_usb_free_pipe_data(usb_ld);
++			return -ENOMEM;
++		}
++	}
++
++	mif_info("if_usb_init() done : %d, usb_ld (0x%p)\n",
++								ret, usb_ld);
++	return ret;
++}
++
++static int usb_link_pm_init(struct usb_link_device *usb_ld, void *data)
++{
++	int r;
++	struct platform_device *pdev = (struct platform_device *)data;
++	struct modem_data *pdata =
++			(struct modem_data *)pdev->dev.platform_data;
++	struct modemlink_pm_data *pm_pdata;
++	struct link_pm_data *pm_data;
++
++	if (!pdata || !pdata->link_pm_data) {
++		mif_err("platform data is NULL\n");
++		return -EINVAL;
++	}
++	pm_pdata = pdata->link_pm_data;
++
++	pm_data = kzalloc(sizeof(struct link_pm_data), GFP_KERNEL);
++	if (!pm_data) {
++		mif_err("link_pm_data is NULL\n");
++		return -ENOMEM;
++	}
++
++	/* get link pm data from modemcontrol's platform data */
++	pm_data->gpio_link_active = pm_pdata->gpio_link_active;
++	pm_data->gpio_link_enable = pm_pdata->gpio_link_enable;
++	pm_data->gpio_link_hostwake = pm_pdata->gpio_link_hostwake;
++	pm_data->gpio_link_slavewake = pm_pdata->gpio_link_slavewake;
++	pm_data->irq_link_hostwake = gpio_to_irq(pm_data->gpio_link_hostwake);
++	pm_data->link_ldo_enable = pm_pdata->link_ldo_enable;
++	pm_data->link_reconnect = pm_pdata->link_reconnect;
++	pm_data->ehci_reg_dump = pm_pdata->ehci_reg_dump;
++
++	pm_data->usb_ld = usb_ld;
++	pm_data->link_pm_active = false;
++	pm_data->ipc_debug_cnt = 0;
++	usb_ld->link_pm_data = pm_data;
++
++	pm_data->miscdev.minor = MISC_DYNAMIC_MINOR;
++	pm_data->miscdev.name = "link_pm";
++	pm_data->miscdev.fops = &link_pm_fops;
++
++	r = misc_register(&pm_data->miscdev);
++	if (r < 0) {
++		mif_err("fail to register pm device(%d)\n", r);
++		goto err_misc_register;
++	}
++
++	r = request_irq(pm_data->irq_link_hostwake, link_pm_irq_handler,
++		IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING,
++		"hostwake", (void *)pm_data);
++	if (r) {
++		mif_err("fail to request irq(%d)\n", r);
++		goto err_request_irq;
++	}
++
++	r = enable_irq_wake(pm_data->irq_link_hostwake);
++	if (r) {
++		mif_err("failed to enable_irq_wake:%d\n", r);
++		goto err_set_wake_irq;
++	}
++
++	/* create work queue & init work for runtime pm */
++	pm_data->wq = alloc_ordered_workqueue("linkpmd", WQ_MEM_RECLAIM);
++	if (!pm_data->wq) {
++		mif_err("fail to create wq\n");
++		goto err_create_wq;
++	}
++
++	pm_data->pm_notifier.notifier_call = link_pm_notifier_event;
++	register_pm_notifier(&pm_data->pm_notifier);
++
++	init_completion(&pm_data->active_done);
++	INIT_DELAYED_WORK(&pm_data->link_pm_work, link_pm_runtime_work);
++	INIT_DELAYED_WORK(&pm_data->link_pm_start, link_pm_runtime_start);
++	INIT_DELAYED_WORK(&pm_data->link_reconnect_work,
++						link_pm_reconnect_work);
++	wake_lock_init(&pm_data->l2_wake, WAKE_LOCK_SUSPEND, "l2_hsic");
++	wake_lock_init(&pm_data->boot_wake, WAKE_LOCK_SUSPEND, "boot_hsic");
++	wake_lock_init(&pm_data->rpm_wake, WAKE_LOCK_SUSPEND, "rpm_hsic");
++	wake_lock_init(&pm_data->tx_async_wake, WAKE_LOCK_SUSPEND, "tx_hsic");
++
++#if defined(CONFIG_SLP)
++	device_init_wakeup(pm_data->miscdev.this_device, true);
++#endif
++
++	return 0;
++
++err_create_wq:
++	disable_irq_wake(pm_data->irq_link_hostwake);
++err_set_wake_irq:
++	free_irq(pm_data->irq_link_hostwake, (void *)pm_data);
++err_request_irq:
++	misc_deregister(&pm_data->miscdev);
++err_misc_register:
++	kfree(pm_data);
++	return r;
++}
++
++struct link_device *hsic_create_link_device(void *data)
++{
++	int ret;
++	struct usb_link_device *usb_ld;
++	struct link_device *ld;
++
++	usb_ld = kzalloc(sizeof(struct usb_link_device), GFP_KERNEL);
++	if (!usb_ld)
++		return NULL;
++
++	INIT_LIST_HEAD(&usb_ld->ld.list);
++	skb_queue_head_init(&usb_ld->ld.sk_fmt_tx_q);
++	skb_queue_head_init(&usb_ld->ld.sk_raw_tx_q);
++
++	ld = &usb_ld->ld;
++
++	ld->name = "usb";
++	ld->init_comm = usb_init_communication;
++	ld->terminate_comm = usb_terminate_communication;
++	ld->send = usb_send;
++	ld->com_state = COM_NONE;
++	ld->raw_tx_suspended = false;
++	init_completion(&ld->raw_tx_resumed_by_cp);
++
++	ld->tx_wq = alloc_ordered_workqueue("usb_tx_wq", WQ_MEM_RECLAIM);
++	if (!ld->tx_wq) {
++		mif_err("fail to create work Q.\n");
++		goto err;
++	}
++
++	INIT_DELAYED_WORK(&ld->tx_delayed_work, usb_tx_work);
++	INIT_DELAYED_WORK(&usb_ld->rx_retry_work, usb_rx_retry_work);
++	usb_ld->rx_retry_cnt = 0;
++
++	/* create link pm device */
++	ret = usb_link_pm_init(usb_ld, data);
++	if (ret)
++		goto err;
++
++	ret = if_usb_init(ld);
++	if (ret)
++		goto err;
++
++	mif_info("%s : create_link_device DONE\n", usb_ld->ld.name);
++	return (void *)ld;
++err:
++	kfree(usb_ld);
++	return NULL;
++}
+diff --git a/drivers/misc/modem_if/modem_link_device_hsic.h b/drivers/misc/modem_if/modem_link_device_hsic.h
+new file mode 100755
+index 000000000..604b06784
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_link_device_hsic.h
+@@ -0,0 +1,155 @@
++/*
++ * Copyright (C) 2010 Google, Inc.
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#ifndef __MODEM_LINK_DEVICE_USB_H__
++#define __MODEM_LINK_DEVICE_USB_H__
++
++
++enum {
++	IF_USB_BOOT_EP = 0,
++	IF_USB_FMT_EP = 0,
++	IF_USB_RAW_EP,
++	IF_USB_RFS_EP,
++	IF_USB_CMD_EP,
++	IF_USB_DEVNUM_MAX,
++};
++
++/* each pipe has 2 ep for in/out */
++#define LINKPM_DEV_NUM	(IF_USB_DEVNUM_MAX * 2)
++/******************/
++/* xmm6260 specific */
++
++#define IOCTL_LINK_CONTROL_ENABLE	_IO('o', 0x30)
++#define IOCTL_LINK_CONTROL_ACTIVE	_IO('o', 0x31)
++#define IOCTL_LINK_GET_HOSTWAKE		_IO('o', 0x32)
++#define IOCTL_LINK_CONNECTED		_IO('o', 0x33)
++#define IOCTL_LINK_SET_BIAS_CLEAR	_IO('o', 0x34)
++#define IOCTL_LINK_GET_PHONEACTIVE	_IO('o', 0x35)
++
++/* VID,PID for IMC - XMM6260, XMM6262*/
++#define IMC_BOOT_VID		0x058b
++#define IMC_BOOT_PID		0x0041
++#define IMC_MAIN_VID		0x1519
++#define IMC_MAIN_PID		0x0020
++/* VID,PID for STE - M7400 */
++#define STE_BOOT_VID		0x04cc
++#define STE_BOOT_PID		0x7400
++#define STE_MAIN_VID		0x04cc
++#define STE_MAIN_PID		0x2333
++
++enum {
++	BOOT_DOWN = 0,
++	IPC_CHANNEL
++};
++
++enum ch_state {
++	STATE_SUSPENDED,
++	STATE_RESUMED,
++};
++
++#define HOSTWAKE_TRIGLEVEL	0
++/******************/
++
++struct link_pm_info {
++	struct usb_link_device *usb_ld;
++};
++
++struct usb_id_info {
++	int intf_id;
++	struct usb_link_device *usb_ld;
++};
++
++struct link_pm_data {
++	struct miscdevice miscdev;
++	struct usb_link_device *usb_ld;
++	unsigned irq_link_hostwake;
++	int (*link_ldo_enable)(bool);
++	unsigned gpio_link_enable;
++	unsigned gpio_link_active;
++	unsigned gpio_link_hostwake;
++	unsigned gpio_link_slavewake;
++	int (*link_reconnect)(void);
++	int link_reconnect_cnt;
++
++	struct workqueue_struct *wq;
++	struct completion active_done;
++	struct delayed_work link_pm_work;
++	struct delayed_work link_pm_start;
++	struct delayed_work link_reconnect_work;
++	bool resume_requested;
++	bool link_pm_active;
++	int resume_retry_cnt;
++
++	struct wake_lock l2_wake;
++	struct wake_lock boot_wake;
++	struct wake_lock rpm_wake;
++	struct wake_lock tx_async_wake;
++	struct notifier_block pm_notifier;
++	bool dpm_suspending;
++
++	/* Host wakeup toggle debugging */
++	unsigned ipc_debug_cnt;
++	unsigned long tx_cnt;
++	unsigned long rx_cnt;
++
++	void (*ehci_reg_dump)(struct device *);
++};
++
++struct if_usb_devdata {
++	struct usb_interface *data_intf;
++	struct usb_link_device *usb_ld;
++	struct usb_device *usbdev;
++	unsigned int tx_pipe;
++	unsigned int rx_pipe;
++	u8 disconnected;
++
++	int format;
++	struct urb *urb;
++	void *rx_buf;
++	unsigned int rx_buf_size;
++	enum ch_state state;
++};
++
++struct usb_link_device {
++	/*COMMON LINK DEVICE*/
++	struct link_device ld;
++
++	/*USB SPECIFIC LINK DEVICE*/
++	struct usb_device	*usbdev;
++	struct if_usb_devdata	devdata[IF_USB_DEVNUM_MAX];
++	unsigned int		dev_count;
++	unsigned int		suspended;
++	int if_usb_connected;
++
++	bool if_usb_is_main; /* boot,down(false) or main(true) */
++
++	/* LINK PM DEVICE DATA */
++	struct link_pm_data *link_pm_data;
++
++	/*RX retry work by -ENOMEM*/
++	struct delayed_work rx_retry_work;
++	struct urb *retry_urb;
++	unsigned rx_retry_cnt;
++};
++/* converts from struct link_device* to struct xxx_link_device* */
++#define to_usb_link_device(linkdev) \
++			container_of(linkdev, struct usb_link_device, ld)
++
++
++#ifdef FOR_TEGRA
++extern void tegra_ehci_txfilltuning(void);
++#endif
++
++#endif
+diff --git a/drivers/misc/modem_if/modem_main.c b/drivers/misc/modem_if/modem_main.c
+new file mode 100755
+index 000000000..f980c5868
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_main.c
+@@ -0,0 +1,522 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2010 Google, Inc.
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * Samsung modem_if for the Galaxy Note II (GT-N7100): Intel/Infineon XMM6262
++ * on the Exynos4412's HSIC0 port, SIPC4 framing. This combines Samsung's
++ * sipc4_modem.c (driver core) and board-m0-modems.c (board data), with the
++ * GPIOs taken from the device tree instead of a board file.
++ *
++ * The userspace interface is unchanged, so Samsung's cbd (modem boot daemon)
++ * and libsec-ril.so work as they did on the stock 3.0 kernel:
++ *   /dev/umts_boot0, umts_ipc0, umts_rfs0, umts_csd, umts_router,
++ *   umts_ramdump0, umts_loopback0, multipdp, /dev/link_pm, rmnet0-2 and
++ *   /sys/devices/platform/s5p-ehci/ehci_power (cbd power-cycles the HSIC host
++ *   around the modem's switch from boot ROM to firmware).
++ */
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/gpio.h>
++#include <linux/gpio/consumer.h>
++#include <linux/interrupt.h>
++#include <linux/kernfs.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++
++#include "modem.h"
++#include "modem_prj.h"
++#include "modem_utils.h"
++
++#define FMT_WAKE_TIME   (HZ/2)
++#define RFS_WAKE_TIME   (HZ*3)
++#define RAW_WAKE_TIME   (HZ*6)
++
++
++/* umts target platform data (board-m0-modems.c) */
++static struct modem_io_t umts_io_devices[] = {
++	{ .name = "umts_ipc0", .id = 0x1, .format = IPC_FMT,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "umts_rfs0", .id = 0x41, .format = IPC_RFS,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "umts_boot0", .id = 0x0, .format = IPC_BOOT,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "multipdp", .id = 0x1, .format = IPC_MULTI_RAW,
++	  .io_type = IODEV_DUMMY, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "rmnet0", .id = 0x2A, .format = IPC_RAW,
++	  .io_type = IODEV_NET, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "rmnet1", .id = 0x2B, .format = IPC_RAW,
++	  .io_type = IODEV_NET, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "rmnet2", .id = 0x2C, .format = IPC_RAW,
++	  .io_type = IODEV_NET, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "umts_router", .id = 0x39, .format = IPC_RAW,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "umts_csd", .id = 0x21, .format = IPC_RAW,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "umts_ramdump0", .id = 0x0, .format = IPC_RAMDUMP,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++	{ .name = "umts_loopback0", .id = 0x3f, .format = IPC_RAW,
++	  .io_type = IODEV_MISC, .links = LINKTYPE(LINKDEV_HSIC) },
++};
++
++static struct modemlink_pm_data modem_link_pm_data;
++static struct modem_data umts_modem_data;
++static struct platform_device *ehci_pdev;	/* the HSIC host */
++static struct platform_device *s5p_ehci_compat, *s5p_ohci_compat;
++
++/* board-m0-modems.c: HSIC specific functions */
++static void set_slave_wake(void)
++{
++	if (gpio_get_value(modem_link_pm_data.gpio_link_hostwake)) {
++		mif_info("Slave Wake\n");
++		if (gpio_get_value(modem_link_pm_data.gpio_link_slavewake)) {
++			mif_info("Slave Wake set _-\n");
++			gpio_direction_output(
++				modem_link_pm_data.gpio_link_slavewake, 0);
++			mdelay(10);
++		}
++		gpio_direction_output(
++			modem_link_pm_data.gpio_link_slavewake, 1);
++	}
++}
++
++/* Samsung's EHCI driver drove ACTIVE_STATE (host active) with the host's
++ * power state; the CP only listens to it once out of reset */
++static void set_host_states(int active)
++{
++	if (!gpio_get_value(umts_modem_data.gpio_cp_reset)) {
++		mif_info("CP not ready, Active State low\n");
++		return;
++	}
++	gpio_direction_output(modem_link_pm_data.gpio_link_active, active);
++}
++
++static int umts_link_reconnect(void)
++{
++	if (gpio_get_value(umts_modem_data.gpio_phone_active) &&
++		gpio_get_value(umts_modem_data.gpio_cp_reset)) {
++		mif_info("trying reconnect link\n");
++		gpio_set_value(modem_link_pm_data.gpio_link_active, 0);
++		mdelay(10);
++		set_slave_wake();
++		gpio_set_value(modem_link_pm_data.gpio_link_active, 1);
++	} else
++		return -ENODEV;
++
++	return 0;
++}
++
++/* The pins the AP drives towards a powered-down CP; inputs stay inputs
++ * (gpiolib won't turn an IRQ line into an output) */
++static void xmm_gpio_revers_bias_clear(void)
++{
++	gpio_direction_output(umts_modem_data.gpio_pda_active, 0);
++	gpio_direction_output(modem_link_pm_data.gpio_link_active, 0);
++	gpio_direction_output(modem_link_pm_data.gpio_link_slavewake, 0);
++	msleep(20);
++}
++
++static void xmm_gpio_revers_bias_restore(void)
++{
++}
++
++/*
++ * /sys/devices/platform/s5p-ehci/ehci_power, where cbd looks for it: forward to
++ * the ehci_power node of the exynos-ehci driver (Simon Shields' "HACK: usb:
++ * host: ehci-exynos: add ehci_power sysfs node": HCD removed/added, PHY off/on,
++ * like Samsung's s5p-ehci), plus the ACTIVE_STATE handling Samsung's EHCI
++ * driver did through set_host_states().
++ */
++static struct device_attribute *ehci_power_attr(void)
++{
++	struct kernfs_node *kn;
++	struct attribute *attr;
++
++	if (!ehci_pdev)
++		return NULL;
++	kn = kernfs_find_and_get(ehci_pdev->dev.kobj.sd, "ehci_power");
++	if (!kn)
++		return NULL;
++	attr = kn->priv;
++	kernfs_put(kn);
++	return container_of(attr, struct device_attribute, attr);
++}
++
++static ssize_t ehci_power_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct device_attribute *real = ehci_power_attr();
++
++	if (!real || !real->show)
++		return -ENODEV;
++	return real->show(&ehci_pdev->dev, real, buf);
++}
++
++static ssize_t ehci_power_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct device_attribute *real = ehci_power_attr();
++	int power_on;
++	ssize_t ret;
++
++	if (kstrtoint(buf, 10, &power_on))
++		return -EINVAL;
++	if (!real || !real->store)
++		return -ENODEV;
++
++	mif_info("EHCI turns %s\n", power_on ? "on" : "off");
++	ret = real->store(&ehci_pdev->dev, real, buf, count);
++	set_host_states(!!power_on);
++	return ret;
++}
++static DEVICE_ATTR_RW(ehci_power);
++
++/* OHCI isn't on the HSIC port; accept the writes cbd also makes there */
++static ssize_t ohci_power_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "OHCI Power on\n");
++}
++
++static ssize_t ohci_power_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	return count;
++}
++static DEVICE_ATTR_RW(ohci_power);
++
++static int modem_register_hci_compat(struct device *dev)
++{
++	struct device_node *np;
++	int ret;
++
++	np = of_parse_phandle(dev->of_node, "samsung,hsic-host", 0);
++	if (!np)
++		return dev_err_probe(dev, -EINVAL, "no samsung,hsic-host\n");
++	ehci_pdev = of_find_device_by_node(np);
++	of_node_put(np);
++	if (!ehci_pdev)
++		return -EPROBE_DEFER;
++
++	s5p_ehci_compat = platform_device_register_simple("s5p-ehci", -1,
++							  NULL, 0);
++	if (IS_ERR(s5p_ehci_compat))
++		return PTR_ERR(s5p_ehci_compat);
++	ret = device_create_file(&s5p_ehci_compat->dev, &dev_attr_ehci_power);
++	if (ret)
++		return ret;
++
++	s5p_ohci_compat = platform_device_register_simple("s5p-ohci", -1,
++							  NULL, 0);
++	if (IS_ERR(s5p_ohci_compat))
++		return PTR_ERR(s5p_ohci_compat);
++	return device_create_file(&s5p_ohci_compat->dev, &dev_attr_ohci_power);
++}
++
++static int modem_get_gpio(struct device *dev, const char *con_id,
++			  enum gpiod_flags flags, unsigned *gpio)
++{
++	struct gpio_desc *desc = devm_gpiod_get(dev, con_id, flags);
++
++	if (IS_ERR(desc))
++		return dev_err_probe(dev, PTR_ERR(desc), "%s gpio\n", con_id);
++	gpiod_set_consumer_name(desc, con_id);
++	*gpio = desc_to_gpio(desc);
++	return 0;
++}
++
++static int modem_parse_dt(struct device *dev)
++{
++	struct modem_data *pd = &umts_modem_data;
++	struct modemlink_pm_data *pm = &modem_link_pm_data;
++	unsigned suspend_req;
++	struct clk *clk;
++	int ret;
++
++	/* The PMIC's 32 kHz CP clock. The boot ROM runs without it, the firmware
++	 * hangs (PHONE_ACTIVE high, never enumerates); stock left it on from the
++	 * bootloader, mainline gates it as unused */
++	clk = devm_clk_get_enabled(dev, "cp");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk), "cp clock\n");
++
++	/* umts_modem_cfg_gpio(): CP held off and in reset */
++	ret = modem_get_gpio(dev, "reset-req", GPIOD_OUT_LOW, &pd->gpio_reset_req_n) ?:
++	      modem_get_gpio(dev, "cp-on", GPIOD_OUT_LOW, &pd->gpio_cp_on) ?:
++	      modem_get_gpio(dev, "cp-reset", GPIOD_OUT_LOW, &pd->gpio_cp_reset) ?:
++	      modem_get_gpio(dev, "pda-active", GPIOD_OUT_LOW, &pd->gpio_pda_active) ?:
++	      modem_get_gpio(dev, "phone-active", GPIOD_IN, &pd->gpio_phone_active) ?:
++	      modem_get_gpio(dev, "cp-dump-int", GPIOD_IN, &pd->gpio_cp_dump_int) ?:
++	      modem_get_gpio(dev, "ap-dump-int", GPIOD_OUT_LOW, &pd->gpio_ap_dump_int) ?:
++	      /* set low unused gpios between AP and CP */
++	      modem_get_gpio(dev, "suspend-req", GPIOD_OUT_LOW, &suspend_req) ?:
++	      /* modem_link_pm_config_gpio() */
++	      modem_get_gpio(dev, "link-active", GPIOD_OUT_LOW, &pm->gpio_link_active) ?:
++	      modem_get_gpio(dev, "host-wakeup", GPIOD_IN, &pm->gpio_link_hostwake) ?:
++	      modem_get_gpio(dev, "slave-wakeup", GPIOD_OUT_LOW, &pm->gpio_link_slavewake);
++	if (ret)
++		return ret;
++
++	pd->name = "xmm6262";
++	pd->modem_type = IMC_XMM6262;
++	pd->link_types = LINKTYPE(LINKDEV_HSIC);
++	pd->modem_net = UMTS_NETWORK;
++	pd->use_handover = false;
++	pd->num_iodevs = ARRAY_SIZE(umts_io_devices);
++	pd->iodevs = umts_io_devices;
++	pd->link_pm_data = pm;
++	pd->gpio_revers_bias_clear = xmm_gpio_revers_bias_clear;
++	pd->gpio_revers_bias_restore = xmm_gpio_revers_bias_restore;
++
++	pm->name = "link_pm";
++	pm->link_reconnect = umts_link_reconnect;
++
++	return 0;
++}
++
++/* sipc4_modem.c */
++static struct modem_shared *create_modem_shared_data(struct device *dev)
++{
++	struct modem_shared *msd;
++
++	msd = devm_kzalloc(dev, sizeof(struct modem_shared), GFP_KERNEL);
++	if (!msd)
++		return NULL;
++
++	/* initialize link device list */
++	INIT_LIST_HEAD(&msd->link_dev_list);
++
++	/* initialize tree of io devices */
++	msd->iodevs_tree_chan = RB_ROOT;
++	msd->iodevs_tree_fmt = RB_ROOT;
++	spin_lock_init(&msd->lock);
++
++	return msd;
++}
++
++static struct modem_ctl *create_modemctl_device(struct platform_device *pdev,
++		struct modem_shared *msd)
++{
++	int ret = 0;
++	struct modem_data *pdata;
++	struct modem_ctl *modemctl;
++	struct device *dev = &pdev->dev;
++
++	/* create modem control device */
++	modemctl = devm_kzalloc(dev, sizeof(struct modem_ctl), GFP_KERNEL);
++	if (!modemctl)
++		return NULL;
++
++	modemctl->msd = msd;
++	modemctl->dev = dev;
++	modemctl->phone_state = STATE_OFFLINE;
++
++	pdata = pdev->dev.platform_data;
++	modemctl->mdm_data = pdata;
++	modemctl->name = pdata->name;
++
++	/* init modemctl device for getting modemctl operations */
++	ret = xmm6262_init_modemctl_device(modemctl, pdata);
++	if (ret)
++		return NULL;
++
++	mif_info("%s is created!!!\n", pdata->name);
++
++	return modemctl;
++}
++
++static struct io_device *create_io_device(struct device *dev,
++		struct modem_io_t *io_t, struct modem_shared *msd,
++		struct modem_ctl *modemctl, struct modem_data *pdata)
++{
++	int ret = 0;
++	struct io_device *iod = NULL;
++
++	iod = devm_kzalloc(dev, sizeof(struct io_device), GFP_KERNEL);
++	if (!iod) {
++		mif_err("iod == NULL\n");
++		return NULL;
++	}
++
++	RB_CLEAR_NODE(&iod->node_chan);
++	RB_CLEAR_NODE(&iod->node_fmt);
++
++	iod->name = io_t->name;
++	iod->id = io_t->id;
++	iod->format = io_t->format;
++	iod->io_typ = io_t->io_type;
++	iod->link_types = io_t->links;
++	iod->net_typ = pdata->modem_net;
++	iod->use_handover = pdata->use_handover;
++	iod->ipc_version = pdata->ipc_version;
++	atomic_set(&iod->opened, 0);
++
++	/* link between io device and modem control */
++	iod->mc = modemctl;
++	if (iod->format == IPC_FMT)
++		modemctl->iod = iod;
++	if (iod->format == IPC_BOOT) {
++		modemctl->bootd = iod;
++		mif_info("Boot device = %s\n", iod->name);
++	}
++
++	/* link between io device and modem shared */
++	iod->msd = msd;
++
++	/* add iod to rb_tree */
++	if (iod->format != IPC_RAW)
++		insert_iod_with_format(msd, iod->format, iod);
++
++	if (sipc4_is_not_reserved_channel(iod->id))
++		insert_iod_with_channel(msd, iod->id, iod);
++
++	/* register misc device or net device */
++	ret = sipc4_init_io_device(iod);
++	if (ret) {
++		mif_err("sipc4_init_io_device fail (%d)\n", ret);
++		return NULL;
++	}
++
++	mif_debug("%s is created!!!\n", iod->name);
++	return iod;
++}
++
++static int attach_devices(struct io_device *iod, enum modem_link tx_link)
++{
++	struct modem_shared *msd = iod->msd;
++	struct link_device *ld;
++
++	/* find link type for this io device */
++	list_for_each_entry(ld, &msd->link_dev_list, list) {
++		if (IS_CONNECTED(iod, ld)) {
++			if ((countbits(iod->link_types) <= 1) ||
++					(tx_link == ld->link_type)) {
++				mif_debug("set %s->%s\n", iod->name, ld->name);
++				set_current_link(iod, ld);
++			}
++		}
++	}
++
++	if (!get_current_link(iod)) {
++		mif_err("%s->link == NULL\n", iod->name);
++		return -ENODEV;
++	}
++
++	switch (iod->format) {
++	case IPC_FMT:
++		wake_lock_init(&iod->wakelock, WAKE_LOCK_SUSPEND, iod->name);
++		iod->waketime = FMT_WAKE_TIME;
++		break;
++
++	case IPC_RFS:
++		wake_lock_init(&iod->wakelock, WAKE_LOCK_SUSPEND, iod->name);
++		iod->waketime = RFS_WAKE_TIME;
++		break;
++
++	case IPC_MULTI_RAW:
++		wake_lock_init(&iod->wakelock, WAKE_LOCK_SUSPEND, iod->name);
++		iod->waketime = RAW_WAKE_TIME;
++		break;
++
++	case IPC_BOOT:
++		wake_lock_init(&iod->wakelock, WAKE_LOCK_SUSPEND, iod->name);
++		iod->waketime = 3 * HZ;
++		break;
++
++	default:
++		break;
++	}
++
++	return 0;
++}
++
++static int modem_probe(struct platform_device *pdev)
++{
++	int i, ret;
++	struct device *dev = &pdev->dev;
++	struct modem_data *pdata = &umts_modem_data;
++	struct modem_shared *msd;
++	struct modem_ctl *modemctl;
++	struct io_device *iod;
++	struct link_device *ld;
++
++	ret = modem_parse_dt(dev);
++	if (ret)
++		return ret;
++	ret = modem_register_hci_compat(dev);
++	if (ret)
++		return ret;
++	pdev->dev.platform_data = pdata;
++
++	msd = create_modem_shared_data(dev);
++	if (!msd)
++		return -ENOMEM;
++
++	modemctl = create_modemctl_device(pdev, msd);
++	if (!modemctl)
++		return -ENOMEM;
++
++	/* create link device */
++	ld = hsic_create_link_device(pdev);
++	if (!ld)
++		return -ENOMEM;
++	mif_info("link created: %s\n", ld->name);
++	ld->link_type = LINKDEV_HSIC;
++	ld->mc = modemctl;
++	ld->msd = msd;
++	list_add(&ld->list, &msd->link_dev_list);
++
++	/* create io devices and connect to modemctl device */
++	for (i = 0; i < pdata->num_iodevs; i++) {
++		iod = create_io_device(dev, &pdata->iodevs[i], msd, modemctl,
++				       pdata);
++		if (!iod) {
++			mif_err("iod[%d] == NULL\n", i);
++			return -ENOMEM;
++		}
++
++		ret = attach_devices(iod, pdata->iodevs[i].tx_link);
++		if (ret)
++			return ret;
++	}
++
++	platform_set_drvdata(pdev, modemctl);
++
++	mif_info("Complete!!!\n");
++	return 0;
++}
++
++static void modem_shutdown(struct platform_device *pdev)
++{
++	struct modem_ctl *mc = platform_get_drvdata(pdev);
++
++	if (!mc)
++		return;
++	mc->ops.modem_off(mc);
++	mc->phone_state = STATE_OFFLINE;
++}
++
++static const struct of_device_id modem_of_match[] = {
++	{ .compatible = "samsung,n7100-modem-xmm6262" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, modem_of_match);
++
++static struct platform_driver modem_driver = {
++	.probe = modem_probe,
++	.shutdown = modem_shutdown,
++	.driver = {
++		.name = "modem_if",
++		.of_match_table = modem_of_match,
++		/* char devices, net devices and a USB driver hang off it */
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(modem_driver);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("Samsung Modem Interface Driver (XMM6262 over HSIC)");
+diff --git a/drivers/misc/modem_if/modem_modemctl_device_xmm6262.c b/drivers/misc/modem_if/modem_modemctl_device_xmm6262.c
+new file mode 100755
+index 000000000..b5a8ae4d8
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_modemctl_device_xmm6262.c
+@@ -0,0 +1,359 @@
++/* /linux/drivers/misc/modem_if/modem_modemctl_device_xmm6262.c
++ *
++ * Copyright (C) 2010 Google, Inc.
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#define DEBUG
++
++#include <linux/init.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
++#include <linux/gpio.h>
++#include <linux/delay.h>
++#include <linux/platform_device.h>
++#include "modem.h"
++#include "modem_prj.h"
++#ifdef CONFIG_FAST_BOOT
++#include <linux/fake_shut_down.h>
++#endif
++static int xmm6262_on(struct modem_ctl *mc)
++{
++	mif_info("\n");
++
++	if (!mc->gpio_cp_reset || !mc->gpio_cp_on || !mc->gpio_reset_req_n) {
++		mif_err("no gpio data\n");
++		return -ENXIO;
++	}
++
++	if (mc->gpio_revers_bias_clear)
++		mc->gpio_revers_bias_clear();
++
++#ifdef CONFIG_SEC_DUAL_MODEM_MODE
++	gpio_set_value(mc->gpio_sim_io_sel, 0);
++	gpio_set_value(mc->gpio_cp_ctrl1, 1);
++	gpio_set_value(mc->gpio_cp_ctrl2, 0);
++#endif
++
++	/* TODO */
++	gpio_set_value(mc->gpio_reset_req_n, 0);
++	gpio_set_value(mc->gpio_cp_on, 0);
++	gpio_set_value(mc->gpio_cp_reset, 0);
++	msleep(100);
++	gpio_set_value(mc->gpio_cp_reset, 1);
++	/* If XMM6262 was connected with C2C, AP wait 50ms to BB Reset*/
++	msleep(50);
++	gpio_set_value(mc->gpio_reset_req_n, 1);
++
++	gpio_set_value(mc->gpio_cp_on, 1);
++	udelay(60);
++	gpio_set_value(mc->gpio_cp_on, 0);
++	msleep(20);
++
++	mc->phone_state = STATE_BOOTING;
++
++	if (mc->gpio_revers_bias_restore)
++		mc->gpio_revers_bias_restore();
++	gpio_set_value(mc->gpio_pda_active, 1);
++
++
++	return 0;
++}
++
++static int xmm6262_off(struct modem_ctl *mc)
++{
++	mif_info("\n");
++
++	if (!mc->gpio_cp_reset || !mc->gpio_cp_on) {
++		mif_err("no gpio data\n");
++		return -ENXIO;
++	}
++
++	gpio_set_value(mc->gpio_cp_on, 0);
++	gpio_set_value(mc->gpio_cp_reset, 0);
++
++	return 0;
++}
++
++static int xmm6262_reset(struct modem_ctl *mc)
++{
++	mif_info("\n");
++
++	if (!mc->gpio_cp_reset || !mc->gpio_reset_req_n)
++		return -ENXIO;
++
++	if (mc->gpio_revers_bias_clear)
++		mc->gpio_revers_bias_clear();
++
++	gpio_set_value(mc->gpio_cp_reset, 0);
++	gpio_set_value(mc->gpio_reset_req_n, 0);
++
++	mc->phone_state = STATE_OFFLINE;
++
++	msleep(20);
++
++	gpio_set_value(mc->gpio_cp_reset, 1);
++	/* TODO: check the reset timming with C2C connection */
++	udelay(160);
++
++	gpio_set_value(mc->gpio_reset_req_n, 1);
++	udelay(100);
++
++	gpio_set_value(mc->gpio_cp_on, 1);
++	udelay(60);
++	gpio_set_value(mc->gpio_cp_on, 0);
++	msleep(20);
++
++	if (mc->gpio_revers_bias_restore)
++		mc->gpio_revers_bias_restore();
++
++	mc->phone_state = STATE_BOOTING;
++
++	return 0;
++}
++
++static int xmm6262_force_crash_exit(struct modem_ctl *mc)
++{
++	mif_info("\n");
++
++	if (!mc->gpio_ap_dump_int)
++		return -ENXIO;
++	
++	gpio_set_value(mc->gpio_ap_dump_int, 1);
++	mif_info("set ap_dump_int(%d) to high=%d\n",
++		mc->gpio_ap_dump_int, gpio_get_value(mc->gpio_ap_dump_int));
++	return 0;
++}
++
++
++static irqreturn_t phone_active_irq_handler(int irq, void *_mc)
++{
++	int phone_reset = 0;
++	int phone_active_value = 0;
++	int cp_dump_value = 0;
++	int phone_state = 0;
++	struct modem_ctl *mc = (struct modem_ctl *)_mc;
++
++	disable_irq_nosync(mc->irq_phone_active);
++
++	if (!mc->gpio_cp_reset || !mc->gpio_phone_active ||
++			!mc->gpio_cp_dump_int) {
++		mif_err("no gpio data\n");
++		return IRQ_HANDLED;
++	}
++
++	phone_reset = gpio_get_value(mc->gpio_cp_reset);
++	phone_active_value = gpio_get_value(mc->gpio_phone_active);
++	cp_dump_value = gpio_get_value(mc->gpio_cp_dump_int);
++
++	mif_info("PA EVENT : reset =%d, pa=%d, cp_dump=%d\n",
++				phone_reset, phone_active_value, cp_dump_value);
++
++	if (phone_reset && phone_active_value) {
++		phone_state = STATE_BOOTING;
++	} else if (mc->dev->power.is_suspended && !phone_active_value) {
++		/*fixing dpm timeout by port2 resume retry*/
++		mif_err("CP reset while dpm resume\n");
++		xmm6262_off(mc);
++		phone_state = STATE_CRASH_RESET;
++	} else if (phone_reset && !phone_active_value) {
++		phone_state =
++			(cp_dump_value) ? STATE_CRASH_EXIT : STATE_CRASH_RESET;
++	} else {
++		phone_state = STATE_OFFLINE;
++	}
++
++	if (mc->iod && mc->iod->modem_state_changed)
++		mc->iod->modem_state_changed(mc->iod, phone_state);
++
++	if (mc->bootd && mc->bootd->modem_state_changed)
++		mc->bootd->modem_state_changed(mc->bootd, phone_state);
++
++	if (phone_active_value)
++		irq_set_irq_type(mc->irq_phone_active, IRQ_TYPE_LEVEL_LOW);
++	else
++		irq_set_irq_type(mc->irq_phone_active, IRQ_TYPE_LEVEL_HIGH);
++	enable_irq(mc->irq_phone_active);
++
++	return IRQ_HANDLED;
++}
++
++#ifdef CONFIG_FAST_BOOT
++#include <linux/reboot.h>
++
++static void mif_sim_detect_complete(struct modem_ctl *mc)
++{
++	if (mc->sim_shutdown_req) {
++		mif_info("fake shutdown sim changed shutdown\n");
++		kernel_power_off();
++		/*kernel_restart(NULL);*/
++		mc->sim_shutdown_req = false;
++	}
++}
++
++static int mif_init_sim_shutdown(struct modem_ctl *mc)
++{
++	mc->sim_shutdown_req = false;
++	mc->modem_complete = mif_sim_detect_complete;
++
++	return 0;
++}
++
++static void mif_check_fake_shutdown(struct modem_ctl *mc, bool online)
++{
++	if (fake_shut_down && mc->sim_state.online != online)
++		mc->sim_shutdown_req = true;
++}
++
++#else
++static inline int mif_init_sim_shutdown(struct modem_ctl *mc) { return 0; }
++#define mif_check_fake_shutdown(a, b) do {} while (0)
++#endif
++
++
++#define SIM_DETECT_DEBUG
++static irqreturn_t sim_detect_irq_handler(int irq, void *_mc)
++{
++	struct modem_ctl *mc = (struct modem_ctl *)_mc;
++#ifdef SIM_DETECT_DEBUG
++	int val = gpio_get_value(mc->gpio_sim_detect);
++	static int unchange;
++	static int prev_val;
++
++	if (mc->phone_state == STATE_BOOTING) {
++		mif_info("BOOTING, reset unchange\n");
++		unchange = 0;
++	}
++
++	if (prev_val == val) {
++		if (unchange++ > 50) {
++			mif_err("Abnormal SIM detect GPIO irqs");
++			disable_irq_nosync(mc->gpio_sim_detect);
++			panic("SIM detect IRQ Error");
++		}
++	} else {
++		unchange = 0;
++	}
++	prev_val = val;
++#endif
++	if (mc->iod && mc->iod->sim_state_changed) {
++		mif_check_fake_shutdown(mc,
++			gpio_get_value(mc->gpio_sim_detect) == mc->sim_polarity
++			);
++		mc->iod->sim_state_changed(mc->iod,
++			gpio_get_value(mc->gpio_sim_detect) == mc->sim_polarity
++			);
++	}
++
++	return IRQ_HANDLED;
++}
++
++static void xmm6262_get_ops(struct modem_ctl *mc)
++{
++	mc->ops.modem_on = xmm6262_on;
++	mc->ops.modem_off = xmm6262_off;
++	mc->ops.modem_reset = xmm6262_reset;
++	mc->ops.modem_force_crash_exit = xmm6262_force_crash_exit;
++}
++
++int xmm6262_init_modemctl_device(struct modem_ctl *mc,
++			struct modem_data *pdata)
++{
++	int ret = 0;
++	struct platform_device *pdev;
++
++	mc->gpio_reset_req_n = pdata->gpio_reset_req_n;
++	mc->gpio_cp_on = pdata->gpio_cp_on;
++	mc->gpio_cp_reset = pdata->gpio_cp_reset;
++	mc->gpio_pda_active = pdata->gpio_pda_active;
++	mc->gpio_phone_active = pdata->gpio_phone_active;
++	mc->gpio_cp_dump_int = pdata->gpio_cp_dump_int;
++	mc->gpio_ap_dump_int = pdata->gpio_ap_dump_int;
++	mc->gpio_flm_uart_sel = pdata->gpio_flm_uart_sel;
++	mc->gpio_cp_warm_reset = pdata->gpio_cp_warm_reset;
++	mc->gpio_sim_detect = pdata->gpio_sim_detect;
++	mc->sim_polarity = pdata->sim_polarity;
++
++	mc->gpio_revers_bias_clear = pdata->gpio_revers_bias_clear;
++	mc->gpio_revers_bias_restore = pdata->gpio_revers_bias_restore;
++
++#ifdef CONFIG_SEC_DUAL_MODEM_MODE
++	mc->gpio_sim_io_sel = pdata->gpio_sim_io_sel;
++	mc->gpio_cp_ctrl1 = pdata->gpio_cp_ctrl1;
++	mc->gpio_cp_ctrl2 = pdata->gpio_cp_ctrl2;
++#endif
++
++
++	pdev = to_platform_device(mc->dev);
++	mc->irq_phone_active = gpio_to_irq(mc->gpio_phone_active);
++
++	if (mc->gpio_sim_detect)
++		mc->irq_sim_detect = gpio_to_irq(mc->gpio_sim_detect);
++
++	xmm6262_get_ops(mc);
++
++	ret = request_irq(mc->irq_phone_active, phone_active_irq_handler,
++				IRQF_TRIGGER_HIGH,
++				"phone_active", mc);
++	if (ret) {
++		mif_err("failed to request_irq:%d\n", ret);
++		goto err_phone_active_request_irq;
++	}
++
++	ret = enable_irq_wake(mc->irq_phone_active);
++	if (ret) {
++		mif_err("failed to enable_irq_wake:%d\n", ret);
++		goto err_phone_active_set_wake_irq;
++	}
++
++	/* initialize sim_state if gpio_sim_detect exists */
++	mc->sim_state.online = false;
++	mc->sim_state.changed = false;
++	if (mc->gpio_sim_detect) {
++		ret = request_irq(mc->irq_sim_detect, sim_detect_irq_handler,
++				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
++				"sim_detect", mc);
++		if (ret) {
++			mif_err("failed to request_irq: %d\n", ret);
++			goto err_sim_detect_request_irq;
++		}
++
++		ret = enable_irq_wake(mc->irq_sim_detect);
++		if (ret) {
++			mif_err("failed to enable_irq_wake: %d\n", ret);
++			goto err_sim_detect_set_wake_irq;
++		}
++
++		/* initialize sim_state => insert: gpio=0, remove: gpio=1 */
++		mc->sim_state.online =
++			gpio_get_value(mc->gpio_sim_detect) == mc->sim_polarity;
++
++		ret = mif_init_sim_shutdown(mc);
++		if (ret) {
++			mif_err("failed to sim fake shutdown init: %d\n", ret);
++			goto err_sim_detect_set_wake_irq;
++		}
++	}
++
++	return ret;
++
++err_sim_detect_set_wake_irq:
++	free_irq(mc->irq_sim_detect, mc);
++err_sim_detect_request_irq:
++	mc->sim_state.online = false;
++	mc->sim_state.changed = false;
++err_phone_active_set_wake_irq:
++	free_irq(mc->irq_phone_active, mc);
++err_phone_active_request_irq:
++	return ret;
++}
+diff --git a/drivers/misc/modem_if/modem_prj.h b/drivers/misc/modem_if/modem_prj.h
+new file mode 100755
+index 000000000..deb2985d0
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_prj.h
+@@ -0,0 +1,817 @@
++/*
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#ifndef __MODEM_PRJ_H__
++#define __MODEM_PRJ_H__
++
++#include <linux/wait.h>
++#include <linux/miscdevice.h>
++#include <linux/skbuff.h>
++#include <linux/interrupt.h>
++#include <linux/completion.h>
++#include "wakelock.h"
++#include <linux/rbtree.h>
++#include <linux/spinlock.h>
++#include <linux/cdev.h>
++#include <linux/types.h>
++#include "modem.h"
++
++#ifndef CONFIG_SAMSUNG_PRODUCT_SHIP
++#define DEBUG_MODEM_IF
++#endif
++
++#define MAX_CPINFO_SIZE		512
++
++#define MAX_LINK_DEVTYPE	3
++
++#define MAX_FMT_DEVS	10
++#define MAX_RAW_DEVS	32
++#define MAX_RFS_DEVS	10
++#define MAX_BOOT_DEVS	10
++#define MAX_DUMP_DEVS	10
++
++#define MAX_IOD_RXQ_LEN	2048
++
++#define IOCTL_MODEM_ON			_IO('o', 0x19)
++#define IOCTL_MODEM_OFF			_IO('o', 0x20)
++#define IOCTL_MODEM_RESET		_IO('o', 0x21)
++#define IOCTL_MODEM_BOOT_ON		_IO('o', 0x22)
++#define IOCTL_MODEM_BOOT_OFF		_IO('o', 0x23)
++#define IOCTL_MODEM_BOOT_DONE		_IO('o', 0x24)
++
++#define IOCTL_MODEM_PROTOCOL_SUSPEND	_IO('o', 0x25)
++#define IOCTL_MODEM_PROTOCOL_RESUME	_IO('o', 0x26)
++
++#define IOCTL_MODEM_STATUS		_IO('o', 0x27)
++#define IOCTL_MODEM_DL_START		_IO('o', 0x28)
++#define IOCTL_MODEM_FW_UPDATE		_IO('o', 0x29)
++
++#define IOCTL_MODEM_NET_SUSPEND		_IO('o', 0x30)
++#define IOCTL_MODEM_NET_RESUME		_IO('o', 0x31)
++
++#define IOCTL_MODEM_DUMP_START		_IO('o', 0x32)
++#define IOCTL_MODEM_DUMP_UPDATE		_IO('o', 0x33)
++#define IOCTL_MODEM_FORCE_CRASH_EXIT	_IO('o', 0x34)
++#define IOCTL_MODEM_CP_UPLOAD		_IO('o', 0x35)
++#define IOCTL_MODEM_DUMP_RESET		_IO('o', 0x36)
++
++#if defined(CONFIG_SEC_DUAL_MODEM_MODE)
++#define IOCTL_MODEM_SWITCH_MODEM	_IO('o', 0x37)
++#endif
++
++#define IOCTL_MODEM_RAMDUMP_START	_IO('o', 0xCE)
++#define IOCTL_MODEM_RAMDUMP_STOP	_IO('o', 0xCF)
++
++#define IOCTL_MODEM_XMIT_BOOT		_IO('o', 0x40)
++#define IOCTL_DPRAM_INIT_STATUS		_IO('o', 0x43)
++
++/* ioctl command for IPC Logger */
++#define IOCTL_MIF_LOG_DUMP		_IO('o', 0x51)
++#define IOCTL_MIF_DPRAM_DUMP		_IO('o', 0x52)
++
++/* ioctl command definitions. */
++#define IOCTL_DPRAM_PHONE_POWON		_IO('o', 0xD0)
++#define IOCTL_DPRAM_PHONEIMG_LOAD	_IO('o', 0xD1)
++#define IOCTL_DPRAM_NVDATA_LOAD		_IO('o', 0xD2)
++#define IOCTL_DPRAM_PHONE_BOOTSTART	_IO('o', 0xD3)
++
++#define IOCTL_DPRAM_PHONE_UPLOAD_STEP1	_IO('o', 0xDE)
++#define IOCTL_DPRAM_PHONE_UPLOAD_STEP2	_IO('o', 0xDF)
++
++#define CPBOOT_DIR_MASK		0xF000
++#define CPBOOT_STAGE_MASK	0x0F00
++#define CPBOOT_CMD_MASK		0x000F
++#define CPBOOT_REQ_RESP_MASK	0x0FFF
++
++#define CPBOOT_DIR_AP2CP	0x9000
++#define CPBOOT_DIR_CP2AP	0xA000
++
++#define CPBOOT_STAGE_SHIFT	8
++
++#define CPBOOT_STAGE_START	0x0000
++#define CPBOOT_CRC_SEND		0x000C
++#define CPBOOT_STAGE_DONE	0x000D
++#define CPBOOT_STAGE_FAIL	0x000F
++
++/* modem status */
++#define MODEM_OFF		0
++#define MODEM_CRASHED		1
++#define MODEM_RAMDUMP		2
++#define MODEM_POWER_ON		3
++#define MODEM_BOOTING_NORMAL	4
++#define MODEM_BOOTING_RAMDUMP	5
++#define MODEM_DUMPING		6
++#define MODEM_RUNNING		7
++
++#define HDLC_HEADER_MAX_SIZE	6 /* fmt 3, raw 6, rfs 6 */
++
++#define PSD_DATA_CHID_BEGIN	0x2A
++#define PSD_DATA_CHID_END	0x38
++
++#define PS_DATA_CH_0		10
++#define PS_DATA_CH_LAST		24
++#define RMNET0_CH_ID		PS_DATA_CH_0
++
++#define IP6VERSION		6
++
++#define SOURCE_MAC_ADDR		{0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}
++
++/* IP loopback */
++#define DATA_DRAIN_CHANNEL	30	/* Drain channel to drop RX packets */
++#define DATA_LOOPBACK_CHANNEL	31
++
++/* Debugging features */
++#define MIF_LOG_DIR		"/sdcard/log"
++#define MIF_MAX_PATH_LEN	256
++#define MIF_MAX_NAME_LEN	64
++#define MIF_MAX_STR_LEN		32
++
++#define CP_CRASH_TAG		"CP Crash "
++
++static const char * const dev_format_str[] = {
++	[IPC_FMT]	= "FMT",
++	[IPC_RAW]	= "RAW",
++	[IPC_RFS]	= "RFS",
++	[IPC_MULTI_RAW]	= "MULTI_RAW",
++	[IPC_CMD]	= "CMD",
++	[IPC_BOOT]	= "BOOT",
++	[IPC_RAMDUMP]	= "RAMDUMP",
++	[IPC_DEBUG]	= "DEBUG",
++};
++
++/**
++ * get_dev_name
++ * @dev: IPC device (enum dev_format)
++ *
++ * Returns IPC device name as a string.
++ */
++static const inline char *get_dev_name(unsigned int dev)
++{
++	if (unlikely(dev >= MAX_DEV_FORMAT))
++		return "INVALID";
++	else
++		return dev_format_str[dev];
++}
++
++/* Does modem ctl structure will use state ? or status defined below ?*/
++enum modem_state {
++	STATE_OFFLINE,
++	STATE_CRASH_RESET, /* silent reset */
++	STATE_CRASH_EXIT, /* cp ramdump */
++	STATE_BOOTING,
++	STATE_ONLINE,
++	STATE_NV_REBUILDING, /* <= rebuilding start */
++	STATE_LOADER_DONE,
++	STATE_SIM_ATTACH,
++	STATE_SIM_DETACH,
++#if defined(CONFIG_SEC_DUAL_MODEM_MODE)
++	STATE_MODEM_SWITCH,
++#endif
++};
++
++static const char * const cp_state_str[] = {
++	[STATE_OFFLINE]		= "OFFLINE",
++	[STATE_CRASH_RESET]	= "CRASH_RESET",
++	[STATE_CRASH_EXIT]	= "CRASH_EXIT",
++	[STATE_BOOTING]		= "BOOTING",
++	[STATE_ONLINE]		= "ONLINE",
++	[STATE_NV_REBUILDING]	= "NV_REBUILDING",
++	[STATE_LOADER_DONE]	= "LOADER_DONE",
++	[STATE_SIM_ATTACH]	= "SIM_ATTACH",
++	[STATE_SIM_DETACH]	= "SIM_DETACH",
++#if defined(CONFIG_SEC_DUAL_MODEM_MODE)
++	[STATE_MODEM_SWITCH]	= "MODEM_SWITCH",
++#endif
++};
++
++static const inline char *get_cp_state_str(int state)
++{
++	return cp_state_str[state];
++}
++
++enum com_state {
++	COM_NONE,
++	COM_ONLINE,
++	COM_HANDSHAKE,
++	COM_BOOT,
++	COM_CRASH,
++};
++
++enum link_mode {
++	LINK_MODE_OFFLINE = 0,
++	LINK_MODE_BOOT,
++	LINK_MODE_IPC,
++	LINK_MODE_DLOAD,
++	LINK_MODE_ULOAD,
++};
++
++struct sim_state {
++	bool online;	/* SIM is online? */
++	bool changed;	/* online is changed? */
++};
++
++enum cp_boot_mode {
++	CP_BOOT_MODE_NORMAL,
++	CP_BOOT_MODE_DUMP,
++	MAX_CP_BOOT_MODE
++};
++
++struct modem_firmware {
++	char *binary;
++	u32 size;
++};
++
++#define HDLC_START		0x7F
++#define HDLC_END		0x7E
++#define SIZE_OF_HDLC_START	1
++#define SIZE_OF_HDLC_END	1
++#define MAX_LINK_PADDING_SIZE	3
++
++struct header_data {
++	char hdr[HDLC_HEADER_MAX_SIZE];
++	u32 len;
++	u32 frag_len;
++	char start; /*hdlc start header 0x7F*/
++};
++
++struct fmt_hdr {
++	u16 len;
++	u8 control;
++} __packed;
++
++struct raw_hdr {
++	u32 len;
++	u8 channel;
++	u8 control;
++} __packed;
++
++struct rfs_hdr {
++	u32 len;
++	u8 cmd;
++	u8 id;
++} __packed;
++
++struct sipc_fmt_hdr {
++	u16 len;
++	u8  msg_seq;
++	u8  ack_seq;
++	u8  main_cmd;
++	u8  sub_cmd;
++	u8  cmd_type;
++} __packed;
++
++#define SIPC5_START_MASK	0b11111000
++#define SIPC5_CONFIG_MASK	0b00000111
++#define SIPC5_EXT_FIELD_MASK	0b00000011
++
++#define SIPC5_PADDING_EXIST	0b00000100
++#define SIPC5_EXT_FIELD_EXIST	0b00000010
++#define SIPC5_CTL_FIELD_EXIST	0b00000001
++
++#define SIPC5_EXT_LENGTH_MASK	SIPC5_EXT_FIELD_EXIST
++#define SIPC5_CTL_FIELD_MASK	(SIPC5_EXT_FIELD_EXIST | SIPC5_CTL_FIELD_EXIST)
++
++#define SIPC5_MIN_HEADER_SIZE		4
++#define SIPC5_HEADER_SIZE_WITH_CTL_FLD	5
++#define SIPC5_HEADER_SIZE_WITH_EXT_LEN	6
++#define SIPC5_MAX_HEADER_SIZE		SIPC5_HEADER_SIZE_WITH_EXT_LEN
++
++#define SIPC5_CONFIG_SIZE	1
++#define SIPC5_CH_ID_SIZE	1
++
++#define SIPC5_CONFIG_OFFSET	0
++#define SIPC5_CH_ID_OFFSET	1
++#define SIPC5_LEN_OFFSET	2
++#define SIPC5_CTL_OFFSET	4
++
++#define SIPC5_CH_ID_PDP_0	10
++#define SIPC5_CH_ID_PDP_LAST	24
++#define SIPC5_CH_ID_BOOT0	215
++#define SIPC5_CH_ID_DUMP0	225
++#define SIPC5_CH_ID_FMT_0	235
++#define SIPC5_CH_ID_RFS_0	245
++#define SIPC5_CH_ID_MAX		255
++
++#define SIPC5_CH_ID_FLOW_CTRL	255
++#define FLOW_CTRL_SUSPEND	((u8)(0xCA))
++#define FLOW_CTRL_RESUME	((u8)(0xCB))
++
++/* If iod->id is 0, do not need to store to `iodevs_tree_fmt' in SIPC4 */
++#define sipc4_is_not_reserved_channel(ch) ((ch) != 0)
++
++/* Channel 0, 5, 6, 27, 255 are reserved in SIPC5.
++ * see SIPC5 spec: 2.2.2 Channel Identification (Ch ID) Field.
++ * They do not need to store in `iodevs_tree_fmt'
++ */
++#define sipc5_is_not_reserved_channel(ch) \
++	((ch) != 0 && (ch) != 5 && (ch) != 6 && (ch) != 27 && (ch) != 255)
++
++struct sipc5_link_hdr {
++	u8 cfg;
++	u8 ch;
++	u16 len;
++	union {
++		u8 ctl;
++		u16 ext_len;
++	};
++} __packed;
++
++struct sipc5_frame_data {
++	/* Frame length calculated from the length fields */
++	unsigned len;
++
++	/* The length of link layer header */
++	unsigned hdr_len;
++
++	/* The length of received header */
++	unsigned hdr_rcvd;
++
++	/* The length of link layer payload */
++	unsigned pay_len;
++
++	/* The length of received data */
++	unsigned pay_rcvd;
++
++	/* The length of link layer padding */
++	unsigned pad_len;
++
++	/* The length of received padding */
++	unsigned pad_rcvd;
++
++	/* Header buffer */
++	u8 hdr[SIPC5_MAX_HEADER_SIZE];
++};
++
++struct vnet {
++	struct io_device *iod;
++};
++
++/* for fragmented data from link devices */
++struct fragmented_data {
++	struct sk_buff *skb_recv;
++	struct header_data h_data;
++	struct sipc5_frame_data f_data;
++	/* page alloc fail retry*/
++	unsigned realloc_offset;
++};
++#define fragdata(iod, ld) (&(iod)->fragments[(ld)->link_type])
++
++/** struct skbuff_priv - private data of struct sk_buff
++ * this is matched to char cb[48] of struct sk_buff
++ */
++struct skbuff_private {
++	struct io_device *iod;
++	struct link_device *ld;
++	struct io_device *real_iod; /* for rx multipdp */
++
++	/* for indicating that thers is only one IPC frame in an skb */
++	bool single_frame;
++} __packed;
++
++static inline struct skbuff_private *skbpriv(struct sk_buff *skb)
++{
++	BUILD_BUG_ON(sizeof(struct skbuff_private) > sizeof(skb->cb));
++	return (struct skbuff_private *)&skb->cb;
++}
++
++enum iod_rx_state {
++	IOD_RX_ON_STANDBY = 0,
++	IOD_RX_HEADER,
++	IOD_RX_PAYLOAD,
++	IOD_RX_PADDING,
++	MAX_IOD_RX_STATE
++};
++
++static const char * const rx_state_str[] = {
++	[IOD_RX_ON_STANDBY]	= "RX_ON_STANDBY",
++	[IOD_RX_HEADER]		= "RX_HEADER",
++	[IOD_RX_PAYLOAD]	= "RX_PAYLOAD",
++	[IOD_RX_PADDING]	= "RX_PADDING",
++};
++
++/**
++ * get_dev_name
++ * @dev: IPC device (enum dev_format)
++ *
++ * Returns IPC device name as a string.
++ */
++static const inline char *get_rx_state_str(unsigned int state)
++{
++	if (unlikely(state >= MAX_IOD_RX_STATE))
++		return "INVALID_STATE";
++	else
++		return rx_state_str[state];
++}
++
++struct io_device {
++	/* rb_tree node for an io device */
++	struct rb_node node_chan;
++	struct rb_node node_fmt;
++
++	/* Name of the IO device */
++	char *name;
++
++	/* Reference count */
++	atomic_t opened;
++
++	/* Wait queue for the IO device */
++	wait_queue_head_t wq;
++
++	/* Misc and net device structures for the IO device */
++	struct miscdevice  miscdev;
++	struct net_device *ndev;
++
++	/* ID and Format for channel on the link */
++	unsigned id;
++	enum modem_link link_types;
++	enum dev_format format;
++	enum modem_io io_typ;
++	enum modem_network net_typ;
++
++	/* The name of the application that will use this IO device */
++	char *app;
++
++	/* Whether or not handover among 2+ link devices */
++	bool use_handover;
++
++	/* SIPC version */
++	enum sipc_ver ipc_version;
++
++	/* Rx queue of sk_buff */
++	struct sk_buff_head sk_rx_q;
++
++	/* RX state used in RX FSM */
++	enum iod_rx_state curr_rx_state;
++	enum iod_rx_state next_rx_state;
++
++	/*
++	** work for each io device, when delayed work needed
++	** use this for private io device rx action
++	*/
++	struct delayed_work rx_work;
++
++	struct fragmented_data fragments[LINKDEV_MAX];
++
++	/* for multi-frame */
++	struct sk_buff *skb[128];
++
++	/* called from linkdevice when a packet arrives for this iodevice */
++	int (*recv)(struct io_device *iod, struct link_device *ld,
++					const char *data, unsigned int len);
++	int (*recv_skb)(struct io_device *iod, struct link_device *ld,
++					struct sk_buff *skb);
++
++	/* inform the IO device that the modem is now online or offline or
++	 * crashing or whatever...
++	 */
++	void (*modem_state_changed)(struct io_device *iod, enum modem_state);
++
++	/* inform the IO device that the SIM is not inserting or removing */
++	void (*sim_state_changed)(struct io_device *iod, bool sim_online);
++
++	struct modem_ctl *mc;
++	struct modem_shared *msd;
++
++	struct wake_lock wakelock;
++	long waketime;
++
++	/* DO NOT use __current_link directly
++	 * you MUST use skbpriv(skb)->ld in mc, link, etc..
++	 */
++	struct link_device *__current_link;
++};
++#define to_io_device(misc) container_of(misc, struct io_device, miscdev)
++
++/* get_current_link, set_current_link don't need to use locks.
++ * In ARM, set_current_link and get_current_link are compiled to
++ * each one instruction (str, ldr) as atomic_set, atomic_read.
++ * And, the order of set_current_link and get_current_link is not important.
++ */
++#define get_current_link(iod) ((iod)->__current_link)
++#define set_current_link(iod, ld) ((iod)->__current_link = (ld))
++
++struct link_device {
++	struct list_head  list;
++	char *name;
++
++	enum modem_link link_type;
++	unsigned aligned;
++
++	/* SIPC version */
++	enum sipc_ver ipc_version;
++
++	/* Maximum IPC device = the last IPC device (e.g. IPC_RFS) + 1 */
++	int max_ipc_dev;
++
++	/* Modem data */
++	struct modem_data *mdm_data;
++
++	/* Modem control */
++	struct modem_ctl *mc;
++
++	/* Modem shared data */
++	struct modem_shared *msd;
++
++	/* Operation mode of the link device */
++	enum link_mode mode;
++
++	/* completion for waiting for link initialization */
++	struct completion init_cmpl;
++
++	/* completion for waiting for PIF initialization in a CP */
++	struct completion pif_cmpl;
++
++	struct io_device *fmt_iods[4];
++
++	/* TX queue of socket buffers */
++	struct sk_buff_head sk_fmt_tx_q;
++	struct sk_buff_head sk_raw_tx_q;
++	struct sk_buff_head sk_rfs_tx_q;
++
++	struct sk_buff_head *skb_txq[MAX_IPC_DEV];
++
++	/* RX queue of socket buffers */
++	struct sk_buff_head sk_fmt_rx_q;
++	struct sk_buff_head sk_raw_rx_q;
++	struct sk_buff_head sk_rfs_rx_q;
++
++	struct sk_buff_head *skb_rxq[MAX_IPC_DEV];
++
++	bool raw_tx_suspended; /* for misc dev */
++	struct completion raw_tx_resumed_by_cp;
++
++	/**
++	 * This flag is for TX flow control on network interface.
++	 * This must be set and clear only by a flow control command from CP.
++	 */
++	bool suspend_netif_tx;
++
++	struct workqueue_struct *tx_wq;
++	struct work_struct tx_work;
++	struct delayed_work tx_delayed_work;
++
++	struct delayed_work *tx_dwork[MAX_IPC_DEV];
++	struct delayed_work fmt_tx_dwork;
++	struct delayed_work raw_tx_dwork;
++	struct delayed_work rfs_tx_dwork;
++
++	struct workqueue_struct *rx_wq;
++	struct work_struct rx_work;
++	struct delayed_work rx_delayed_work;
++
++	enum com_state com_state;
++
++	/* init communication - setting link driver */
++	int (*init_comm)(struct link_device *ld, struct io_device *iod);
++
++	/* terminate communication */
++	void (*terminate_comm)(struct link_device *ld, struct io_device *iod);
++
++	/* called by an io_device when it has a packet to send over link
++	 * - the io device is passed so the link device can look at id and
++	 *   format fields to determine how to route/format the packet
++	 */
++	int (*send)(struct link_device *ld, struct io_device *iod,
++			struct sk_buff *skb);
++
++	/* method for CP booting */
++	int (*xmit_boot)(struct link_device *ld, struct io_device *iod,
++			unsigned long arg);
++
++	/* methods for CP firmware upgrade */
++	int (*dload_start)(struct link_device *ld, struct io_device *iod);
++	int (*firm_update)(struct link_device *ld, struct io_device *iod,
++			unsigned long arg);
++
++	/* methods for CP crash dump */
++	int (*force_dump)(struct link_device *ld, struct io_device *iod);
++	int (*dump_start)(struct link_device *ld, struct io_device *iod);
++	int (*dump_update)(struct link_device *ld, struct io_device *iod,
++			unsigned long arg);
++	int (*dump_finish)(struct link_device *ld, struct io_device *iod,
++			unsigned long arg);
++
++	/* IOCTL extension */
++	int (*ioctl)(struct link_device *ld, struct io_device *iod,
++			unsigned cmd, unsigned long arg);
++};
++
++/** rx_alloc_skb - allocate an skbuff and set skb's iod, ld
++ * @length:	length to allocate
++ * @iod:	struct io_device *
++ * @ld:		struct link_device *
++ *
++ * %NULL is returned if there is no free memory.
++ */
++static inline struct sk_buff *rx_alloc_skb(unsigned int length,
++		struct io_device *iod, struct link_device *ld)
++{
++	struct sk_buff *skb;
++
++	if (iod->format == IPC_MULTI_RAW || iod->format == IPC_RAW)
++		skb = dev_alloc_skb(length);
++	else
++		skb = alloc_skb(length, GFP_ATOMIC);
++
++	if (likely(skb)) {
++		skbpriv(skb)->iod = iod;
++		skbpriv(skb)->ld = ld;
++	}
++	return skb;
++}
++
++struct modemctl_ops {
++	int (*modem_on) (struct modem_ctl *);
++	int (*modem_off) (struct modem_ctl *);
++	int (*modem_reset) (struct modem_ctl *);
++	int (*modem_boot_on) (struct modem_ctl *);
++	int (*modem_boot_off) (struct modem_ctl *);
++	int (*modem_boot_done) (struct modem_ctl *);
++	int (*modem_force_crash_exit) (struct modem_ctl *);
++	int (*modem_dump_reset) (struct modem_ctl *);
++};
++
++/* for IPC Logger */
++struct mif_storage {
++	char *addr;
++	unsigned int cnt;
++};
++
++/* modem_shared - shared data for all io/link devices and a modem ctl
++ * msd : mc : iod : ld = 1 : 1 : M : N
++ */
++struct modem_shared {
++	/* list of link devices */
++	struct list_head link_dev_list;
++
++	/* rb_tree root of io devices. */
++	struct rb_root iodevs_tree_chan; /* group by channel */
++	struct rb_root iodevs_tree_fmt; /* group by dev_format */
++
++	/* for IPC Logger */
++	struct mif_storage storage;
++	spinlock_t lock;
++
++	/* CP crash information */
++	char cp_crash_info[530];
++
++	/* loopbacked IP address
++	 * default is 0.0.0.0 (disabled)
++	 * after you setted this, you can use IP packet loopback using this IP.
++	 * exam: echo 1.2.3.4 > /sys/devices/virtual/misc/umts_multipdp/loopback
++	 */
++	__be32 loopback_ipaddr;
++};
++
++struct modem_ctl {
++	struct device *dev;
++	char *name;
++	struct modem_data *mdm_data;
++
++	struct modem_shared *msd;
++
++	enum modem_state phone_state;
++	struct sim_state sim_state;
++
++	unsigned gpio_cp_on;
++	unsigned gpio_cp_off;
++	unsigned gpio_reset_req_n;
++	unsigned gpio_cp_reset;
++
++	/* for broadcasting AP's PM state (active or sleep) */
++	unsigned gpio_pda_active;
++
++	/* for checking aliveness of CP */
++	unsigned gpio_phone_active;
++	int irq_phone_active;
++
++	/* for AP-CP power management (PM) handshaking */
++	unsigned gpio_ap_wakeup;
++	int irq_ap_wakeup;
++	unsigned gpio_ap_status;
++	unsigned gpio_cp_wakeup;
++	unsigned gpio_cp_status;
++	int irq_cp_status;
++
++	/* for USB/HSIC PM */
++	unsigned gpio_host_wakeup;
++	int irq_host_wakeup;
++	unsigned gpio_host_active;
++	unsigned gpio_slave_wakeup;
++
++#ifdef CONFIG_EXYNOS4_CPUFREQ
++	/* cpu/bus frequency lock */
++	unsigned gpio_cpufreq_lock;
++	struct delayed_work work_cpu_lock;
++	struct delayed_work work_cpu_unlock;
++#endif
++
++	unsigned gpio_cp_dump_int;
++	unsigned gpio_ap_dump_int;
++	unsigned gpio_flm_uart_sel;
++	unsigned gpio_cp_warm_reset;
++#if defined(CONFIG_MACH_M0_CTC)
++	unsigned gpio_flm_uart_sel_rev06;
++#endif
++
++	unsigned gpio_sim_detect;
++	int irq_sim_detect;
++
++#ifdef CONFIG_LINK_DEVICE_PLD
++	unsigned gpio_fpga_cs_n;
++#endif
++
++#if defined(CONFIG_MACH_U1_KOR_LGT)
++	unsigned gpio_cp_reset_msm;
++	unsigned gpio_boot_sw_sel;
++	void (*vbus_on)(void);
++	void (*vbus_off)(void);
++	bool usb_boot;
++#endif
++
++#ifdef CONFIG_TDSCDMA_MODEM_SPRD8803
++	unsigned gpio_ap_cp_int1;
++	unsigned gpio_ap_cp_int2;
++#endif
++
++#ifdef CONFIG_SEC_DUAL_MODEM_MODE
++	unsigned gpio_sim_io_sel;
++	unsigned gpio_cp_ctrl1;
++	unsigned gpio_cp_ctrl2;
++#endif
++
++	/* Switch with 2 links in a modem */
++	unsigned gpio_link_switch;
++
++	const struct attribute_group *group;
++
++	struct delayed_work dwork;
++	struct work_struct work;
++
++	struct modemctl_ops ops;
++	struct io_device *iod;
++	struct io_device *bootd;
++
++	/* Wakelock for modem_ctl */
++	struct wake_lock mc_wake_lock;
++
++	void (*gpio_revers_bias_clear)(void);
++	void (*gpio_revers_bias_restore)(void);
++
++	bool need_switch_to_usb;
++	bool sim_polarity;
++
++	bool sim_shutdown_req;
++	void (*modem_complete)(struct modem_ctl *mc);
++};
++
++int sipc4_init_io_device(struct io_device *iod);
++int xmm6262_init_modemctl_device(struct modem_ctl *mc, struct modem_data *pdata);
++struct link_device *hsic_create_link_device(void *data);
++int sipc5_init_io_device(struct io_device *iod);
++
++bool sipc5_start_valid(u8 *frm);
++bool sipc5_padding_exist(u8 *frm);
++bool sipc5_multi_frame(u8 *frm);
++bool sipc5_ext_len(u8 *frm);
++int sipc5_get_hdr_len(u8 *frm);
++u8 sipc5_get_ch_id(u8 *frm);
++u8 sipc5_get_ctrl_field(u8 *frm);
++int sipc5_get_frame_len(u8 *frm);
++int sipc5_calc_padding_size(int len);
++int sipc5_get_total_len(u8 *frm);
++
++u8 sipc5_build_config(struct io_device *iod, struct link_device *ld, u32 count);
++void sipc5_build_header(struct io_device *iod, struct link_device *ld,
++			u8 *buff, u8 cfg, u8 ctrl, u32 count);
++
++#if defined(CONFIG_TDSCDMA_MODEM_SPRD8803) && defined(CONFIG_LINK_DEVICE_SPI)
++extern int spi_sema_init(void);
++extern int sprd_boot_done;
++#endif
++
++#define STD_UDL_STEP_MASK	0x0000000F
++#define STD_UDL_SEND		0x1
++#define STD_UDL_CRC		0xC
++
++struct std_dload_info {
++	u32 size;
++	u32 mtu;
++	u32 num_frames;
++} __packed;
++
++u32 std_udl_get_cmd(u8 *frm);
++bool std_udl_with_payload(u32 cmd);
++
++#endif
+diff --git a/drivers/misc/modem_if/modem_utils.c b/drivers/misc/modem_if/modem_utils.c
+new file mode 100755
+index 000000000..c7677846b
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_utils.c
+@@ -0,0 +1,191 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2011 Samsung Electronics.
++ *
++ * Helpers of the Samsung modem_if code (trimmed: no IPC logger, no file dumps).
++ */
++#include <linux/netdevice.h>
++#include <linux/platform_device.h>
++#include <linux/skbuff.h>
++#include <linux/string.h>
++
++#include "modem.h"
++#include "modem_prj.h"
++#include "modem_utils.h"
++
++#define CMD_SUSPEND	((unsigned short)(0x00CA))
++#define CMD_RESUME	((unsigned short)(0x00CB))
++
++/* print buffer as hex string */
++int pr_buffer(const char *tag, const char *data, size_t data_len,
++							size_t max_len)
++{
++	size_t len = min(data_len, max_len);
++
++	/* don't change this printk to mif_debug for print this as level7 */
++	printk(KERN_INFO "%s: %s(%zu): %*ph%s\n", MIF_TAG, tag, data_len,
++		(int)len, data, (len == data_len) ? "" : " ...");
++	return 0;
++}
++
++/* flow control CM from CP, it use in serial devices */
++int link_rx_flowctl_cmd(struct link_device *ld, const char *data, size_t len)
++{
++	struct modem_shared *msd = ld->msd;
++	unsigned short *cmd, *end = (unsigned short *)(data + len);
++
++	mif_debug("flow control cmd: size=%zu\n", len);
++
++	for (cmd = (unsigned short *)data; cmd < end; cmd++) {
++		switch (*cmd) {
++		case CMD_SUSPEND:
++			iodevs_for_each(msd, iodev_netif_stop, NULL);
++			ld->raw_tx_suspended = true;
++			mif_info("flowctl CMD_SUSPEND(%04X)\n", *cmd);
++			break;
++
++		case CMD_RESUME:
++			iodevs_for_each(msd, iodev_netif_wake, NULL);
++			ld->raw_tx_suspended = false;
++			complete_all(&ld->raw_tx_resumed_by_cp);
++			mif_info("flowctl CMD_RESUME(%04X)\n", *cmd);
++			break;
++
++		default:
++			mif_err("flowctl BAD CMD: %04X\n", *cmd);
++			break;
++		}
++	}
++
++	return 0;
++}
++
++struct io_device *get_iod_with_channel(struct modem_shared *msd,
++					unsigned channel)
++{
++	struct rb_node *n = msd->iodevs_tree_chan.rb_node;
++	struct io_device *iodev;
++
++	while (n) {
++		iodev = rb_entry(n, struct io_device, node_chan);
++		if (channel < iodev->id)
++			n = n->rb_left;
++		else if (channel > iodev->id)
++			n = n->rb_right;
++		else
++			return iodev;
++	}
++	return NULL;
++}
++
++struct io_device *get_iod_with_format(struct modem_shared *msd,
++			enum dev_format format)
++{
++	struct rb_node *n = msd->iodevs_tree_fmt.rb_node;
++	struct io_device *iodev;
++
++	while (n) {
++		iodev = rb_entry(n, struct io_device, node_fmt);
++		if (format < iodev->format)
++			n = n->rb_left;
++		else if (format > iodev->format)
++			n = n->rb_right;
++		else
++			return iodev;
++	}
++	return NULL;
++}
++
++struct io_device *insert_iod_with_channel(struct modem_shared *msd,
++		unsigned channel, struct io_device *iod)
++{
++	struct rb_node **p = &msd->iodevs_tree_chan.rb_node;
++	struct rb_node *parent = NULL;
++	struct io_device *iodev;
++
++	while (*p) {
++		parent = *p;
++		iodev = rb_entry(parent, struct io_device, node_chan);
++		if (channel < iodev->id)
++			p = &(*p)->rb_left;
++		else if (channel > iodev->id)
++			p = &(*p)->rb_right;
++		else
++			return iodev;
++	}
++	rb_link_node(&iod->node_chan, parent, p);
++	rb_insert_color(&iod->node_chan, &msd->iodevs_tree_chan);
++	return NULL;
++}
++
++struct io_device *insert_iod_with_format(struct modem_shared *msd,
++		enum dev_format format, struct io_device *iod)
++{
++	struct rb_node **p = &msd->iodevs_tree_fmt.rb_node;
++	struct rb_node *parent = NULL;
++	struct io_device *iodev;
++
++	while (*p) {
++		parent = *p;
++		iodev = rb_entry(parent, struct io_device, node_fmt);
++		if (format < iodev->format)
++			p = &(*p)->rb_left;
++		else if (format > iodev->format)
++			p = &(*p)->rb_right;
++		else
++			return iodev;
++	}
++	rb_link_node(&iod->node_fmt, parent, p);
++	rb_insert_color(&iod->node_fmt, &msd->iodevs_tree_fmt);
++	return NULL;
++}
++
++void iodevs_for_each(struct modem_shared *msd, action_fn action, void *args)
++{
++	struct io_device *iod;
++	struct rb_node *node = rb_first(&msd->iodevs_tree_chan);
++
++	for (; node; node = rb_next(node)) {
++		iod = rb_entry(node, struct io_device, node_chan);
++		action(iod, args);
++	}
++}
++
++void iodev_netif_wake(struct io_device *iod, void *args)
++{
++	if (iod->io_typ == IODEV_NET && iod->ndev) {
++		netif_wake_queue(iod->ndev);
++		mif_info("%s\n", iod->name);
++	}
++}
++
++void iodev_netif_stop(struct io_device *iod, void *args)
++{
++	if (iod->io_typ == IODEV_NET && iod->ndev) {
++		netif_stop_queue(iod->ndev);
++		mif_info("%s\n", iod->name);
++	}
++}
++
++/**
++ * ipv4str_to_be32 - ipv4 string to be32 (big endian 32bits integer)
++ * @return: return zero when errors occurred
++ */
++__be32 ipv4str_to_be32(const char *ipv4str, size_t count)
++{
++	unsigned char ip[4];
++	char ipstr[16]; /* == strlen("xxx.xxx.xxx.xxx") + 1 */
++	char *next = ipstr;
++	char *p;
++	int i;
++
++	strscpy(ipstr, ipv4str, min(count + 1, sizeof(ipstr)));
++
++	for (i = 0; i < 4; i++) {
++		p = strsep(&next, ".");
++		if (!p || kstrtou8(strim(p), 10, &ip[i]) < 0)
++			return 0; /* == 0.0.0.0 */
++	}
++
++	return *((__be32 *)ip);
++}
+diff --git a/drivers/misc/modem_if/modem_utils.h b/drivers/misc/modem_if/modem_utils.h
+new file mode 100755
+index 000000000..aa2d68a15
+--- /dev/null
++++ b/drivers/misc/modem_if/modem_utils.h
+@@ -0,0 +1,93 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2011 Samsung Electronics.
++ *
++ * Helpers of the Samsung modem_if code (trimmed: no IPC logger, no file dumps).
++ */
++#ifndef __MODEM_UTILS_H__
++#define __MODEM_UTILS_H__
++
++#include <linux/rbtree.h>
++#include "modem_prj.h"
++
++#define IS_CONNECTED(iod, ld) ((iod)->link_types & LINKTYPE((ld)->link_type))
++
++#define MAX_MIF_BUFF_SIZE 0x80000 /* 512kb */
++#define MIF_TAG	"mif"
++
++static inline struct link_device *find_linkdev(struct modem_shared *msd,
++		enum modem_link link_type)
++{
++	struct link_device *ld;
++
++	list_for_each_entry(ld, &msd->link_dev_list, list) {
++		if (ld->link_type == link_type)
++			return ld;
++	}
++	return NULL;
++}
++
++static inline unsigned int countbits(unsigned int n)
++{
++	unsigned int i;
++
++	for (i = 0; n != 0; i++)
++		n &= (n - 1);
++	return i;
++}
++
++/* print buffer as hex string */
++int pr_buffer(const char *tag, const char *data, size_t data_len,
++							size_t max_len);
++
++/* print a sk_buff as hex string */
++#define pr_skb(tag, skb) \
++	pr_buffer(tag, (char *)((skb)->data), (size_t)((skb)->len), (size_t)16)
++
++/* print a urb as hex string */
++#define pr_urb(tag, urb) \
++	pr_buffer(tag, (char *)((urb)->transfer_buffer), \
++			(size_t)((urb)->actual_length), (size_t)16)
++
++/* flow control CMD from CP, it use in serial devices */
++int link_rx_flowctl_cmd(struct link_device *ld, const char *data, size_t len);
++
++/* get iod from tree functions */
++struct io_device *get_iod_with_format(struct modem_shared *msd,
++					enum dev_format format);
++struct io_device *get_iod_with_channel(struct modem_shared *msd,
++					unsigned channel);
++
++static inline struct io_device *link_get_iod_with_format(
++			struct link_device *ld, enum dev_format format)
++{
++	struct io_device *iod = get_iod_with_format(ld->msd, format);
++
++	return (iod && IS_CONNECTED(iod, ld)) ? iod : NULL;
++}
++
++static inline struct io_device *link_get_iod_with_channel(
++			struct link_device *ld, unsigned channel)
++{
++	struct io_device *iod = get_iod_with_channel(ld->msd, channel);
++
++	return (iod && IS_CONNECTED(iod, ld)) ? iod : NULL;
++}
++
++/* insert iod to tree functions */
++struct io_device *insert_iod_with_format(struct modem_shared *msd,
++			enum dev_format format, struct io_device *iod);
++struct io_device *insert_iod_with_channel(struct modem_shared *msd,
++			unsigned channel, struct io_device *iod);
++
++/* iodev for each */
++typedef void (*action_fn)(struct io_device *iod, void *args);
++void iodevs_for_each(struct modem_shared *msd, action_fn action, void *args);
++
++/* netif wake/stop queue of iod */
++void iodev_netif_wake(struct io_device *iod, void *args);
++void iodev_netif_stop(struct io_device *iod, void *args);
++
++__be32 ipv4str_to_be32(const char *ipv4str, size_t count);
++
++#endif
+diff --git a/drivers/misc/modem_if/sipc4_io_device.c b/drivers/misc/modem_if/sipc4_io_device.c
+new file mode 100755
+index 000000000..99418888c
+--- /dev/null
++++ b/drivers/misc/modem_if/sipc4_io_device.c
+@@ -0,0 +1,1555 @@
++/*
++ * Copyright (C) 2010 Samsung Electronics.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#include <linux/init.h>
++#include <linux/sched.h>
++#include <linux/fs.h>
++#include <linux/poll.h>
++#include <linux/irq.h>
++#include <linux/gpio.h>
++#include <linux/if_arp.h>
++#include <linux/ip.h>
++#include <linux/if_ether.h>
++#include <linux/etherdevice.h>
++#include <linux/device.h>
++
++#include "modem.h"
++#include "modem_prj.h"
++#include "modem_utils.h"
++
++/*
++ * MAX_RXDATA_SIZE is used at making skb, when it called with page size
++ * it need more bytes to allocate itself (Ex, cache byte, shared info,
++ * padding...)
++ * So, give restriction to allocation size below 1 page to prevent
++ * big pages broken.
++ */
++#define MAX_RXDATA_SIZE		(4096 - 512)
++#define MAX_BOOTDATA_SIZE	0x4008	/* EBL package format*/
++#define MAX_MULTI_FMT_SIZE	0x4000	/* 16 * 1024 */
++
++static const char hdlc_start[1] = { HDLC_START };
++static const char hdlc_end[1] = { HDLC_END };
++
++static int rx_iodev_skb(struct sk_buff *skb);
++
++static ssize_t show_waketime(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	unsigned int msec;
++	char *p = buf;
++	struct miscdevice *miscdev = dev_get_drvdata(dev);
++	struct io_device *iod = container_of(miscdev, struct io_device,
++			miscdev);
++
++	msec = jiffies_to_msecs(iod->waketime);
++
++	p += sprintf(buf, "raw waketime : %ums\n", msec);
++
++	return p - buf;
++}
++
++static ssize_t store_waketime(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	unsigned long msec;
++	int ret;
++	struct miscdevice *miscdev = dev_get_drvdata(dev);
++	struct io_device *iod = container_of(miscdev, struct io_device,
++			miscdev);
++
++	ret = kstrtoul(buf, 10, &msec);
++	if (ret)
++		return count;
++
++	iod->waketime = msecs_to_jiffies(msec);
++
++	return count;
++}
++
++static struct device_attribute attr_waketime =
++	__ATTR(waketime, S_IRUGO | S_IWUSR, show_waketime, store_waketime);
++
++static ssize_t show_loopback(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct miscdevice *miscdev = dev_get_drvdata(dev);
++	struct modem_shared *msd =
++		container_of(miscdev, struct io_device, miscdev)->msd;
++	unsigned char *ip = (unsigned char *)&msd->loopback_ipaddr;
++	char *p = buf;
++
++	p += sprintf(buf, "%u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
++
++	return p - buf;
++}
++
++static ssize_t store_loopback(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct miscdevice *miscdev = dev_get_drvdata(dev);
++	struct modem_shared *msd =
++		container_of(miscdev, struct io_device, miscdev)->msd;
++
++	msd->loopback_ipaddr = ipv4str_to_be32(buf, count);
++
++	return count;
++}
++
++static struct device_attribute attr_loopback =
++	__ATTR(loopback, S_IRUGO | S_IWUSR, show_loopback, store_loopback);
++
++static int get_header_size(struct io_device *iod)
++{
++	switch (iod->format) {
++	case IPC_FMT:
++		return sizeof(struct fmt_hdr);
++
++	case IPC_RAW:
++	case IPC_MULTI_RAW:
++		return sizeof(struct raw_hdr);
++
++	case IPC_RFS:
++		return sizeof(struct rfs_hdr);
++
++	case IPC_BOOT:
++		/* minimum size for transaction align */
++		return 4;
++
++	case IPC_RAMDUMP:
++	default:
++		return 0;
++	}
++}
++
++static int get_hdlc_size(struct io_device *iod, char *buf)
++{
++	struct fmt_hdr *fmt_header;
++	struct raw_hdr *raw_header;
++	struct rfs_hdr *rfs_header;
++
++	mif_debug("buf : %02x %02x %02x (%d)\n", *buf, *(buf + 1),
++				*(buf + 2), __LINE__);
++
++	switch (iod->format) {
++	case IPC_FMT:
++		fmt_header = (struct fmt_hdr *)buf;
++		if (iod->mc->mdm_data->ipc_version == SIPC_VER_42)
++			return fmt_header->len & 0x3FFF;
++		else
++			return fmt_header->len;
++	case IPC_RAW:
++	case IPC_MULTI_RAW:
++		raw_header = (struct raw_hdr *)buf;
++		return raw_header->len;
++	case IPC_RFS:
++		rfs_header = (struct rfs_hdr *)buf;
++		return rfs_header->len;
++	default:
++		break;
++	}
++	return 0;
++}
++
++static void *get_header(struct io_device *iod, size_t count,
++			char *frame_header_buf)
++{
++	struct fmt_hdr *fmt_h;
++	struct raw_hdr *raw_h;
++	struct rfs_hdr *rfs_h;
++
++	switch (iod->format) {
++	case IPC_FMT:
++		fmt_h = (struct fmt_hdr *)frame_header_buf;
++
++		fmt_h->len = count + sizeof(struct fmt_hdr);
++		fmt_h->control = 0;
++
++		return (void *)frame_header_buf;
++
++	case IPC_RAW:
++	case IPC_MULTI_RAW:
++		raw_h = (struct raw_hdr *)frame_header_buf;
++
++		raw_h->len = count + sizeof(struct raw_hdr);
++		raw_h->channel = iod->id & 0x1F;
++		raw_h->control = 0;
++
++		return (void *)frame_header_buf;
++
++	case IPC_RFS:
++		rfs_h = (struct rfs_hdr *)frame_header_buf;
++
++		rfs_h->len = count + sizeof(struct raw_hdr);
++		rfs_h->id = iod->id;
++
++		return (void *)frame_header_buf;
++
++	default:
++		return 0;
++	}
++}
++
++static inline int calc_padding_size(struct io_device *iod,
++	struct link_device *ld, unsigned len)
++{
++	if (ld->aligned)
++		return (4 - (len & 0x3)) & 0x3;
++	else
++		return 0;
++}
++
++static inline int rx_hdlc_head_start_check(char *buf)
++{
++	/* check hdlc head and return size of start byte */
++	return (buf[0] == HDLC_START) ? SIZE_OF_HDLC_START : -EBADMSG;
++}
++
++static inline int rx_hdlc_tail_check(char *buf)
++{
++	/* check hdlc tail and return size of tail byte */
++	return (buf[0] == HDLC_END) ? SIZE_OF_HDLC_END : -EBADMSG;
++}
++
++/* remove hdlc header and store IPC header */
++static int rx_hdlc_head_check(struct io_device *iod, struct link_device *ld,
++						char *buf, unsigned rest)
++{
++	struct header_data *hdr = &fragdata(iod, ld)->h_data;
++	int head_size = get_header_size(iod);
++	int done_len = 0;
++	int len = 0;
++
++	/* first frame, remove start header 7F */
++	if (!hdr->start) {
++		len = rx_hdlc_head_start_check(buf);
++		if (len < 0) {
++			mif_err("Wrong HDLC start: 0x%x\n", *buf);
++			return len; /*Wrong hdlc start*/
++		}
++
++		mif_debug("check len : %d, rest : %d (%d)\n", len,
++					rest, __LINE__);
++
++		/* set the start flag of current packet */
++		hdr->start = HDLC_START;
++		hdr->len = 0;
++
++		buf += len;
++		done_len += len;
++		rest -= len; /* rest, call by value */
++	}
++
++	mif_debug("check len : %d, rest : %d (%d)\n",
++			len, rest, __LINE__);
++
++	/* store the HDLC header to iod priv */
++	if (hdr->len < head_size) {
++		len = min(rest, head_size - hdr->len);
++		memcpy(hdr->hdr + hdr->len, buf, len);
++		hdr->len += len;
++		done_len += len;
++	}
++
++	mif_debug("check done_len : %d, rest : %d (%d)\n", done_len,
++				rest, __LINE__);
++	return done_len;
++}
++
++/* alloc skb and copy data to skb */
++static int rx_hdlc_data_check(struct io_device *iod, struct link_device *ld,
++						char *buf, unsigned rest)
++{
++	struct header_data *hdr = &fragdata(iod, ld)->h_data;
++	struct sk_buff *skb = fragdata(iod, ld)->skb_recv;
++	int head_size = get_header_size(iod);
++	int data_size = get_hdlc_size(iod, hdr->hdr) - head_size;
++	int alloc_size;
++	int len = 0;
++	int done_len = 0;
++	int rest_len = data_size - hdr->frag_len;
++	int continue_len = fragdata(iod, ld)->realloc_offset;
++
++	mif_debug("head_size : %d, data_size : %d (%d)\n", head_size,
++				data_size, __LINE__);
++
++	if (continue_len) {
++		/* check the HDLC header*/
++		if (rx_hdlc_head_start_check(buf) == SIZE_OF_HDLC_START) {
++			rest_len -= (head_size + SIZE_OF_HDLC_START);
++			continue_len += (head_size + SIZE_OF_HDLC_START);
++		}
++
++		buf += continue_len;
++		rest -= continue_len;
++		done_len += continue_len;
++		fragdata(iod, ld)->realloc_offset = 0;
++
++		mif_debug("realloc_offset = %d\n", continue_len);
++	}
++
++	/* first payload data - alloc skb */
++	if (!skb) {
++		/* make skb data size under MAX_RXDATA_SIZE */
++		alloc_size = min(data_size, MAX_RXDATA_SIZE);
++		alloc_size = min(alloc_size, rest_len);
++
++		/* exceptional case for RFS channel
++		 * make skb for header info first
++		 */
++		if (iod->format == IPC_RFS && !hdr->frag_len) {
++			skb = rx_alloc_skb(head_size, iod, ld);
++			if (unlikely(!skb))
++				return -ENOMEM;
++			memcpy(skb_put(skb, head_size), hdr->hdr, head_size);
++			rx_iodev_skb(skb);
++		}
++
++		/* allocate first packet for data, when its size exceed
++		 * MAX_RXDATA_SIZE, this packet will split to
++		 * multiple packets
++		 */
++		skb = rx_alloc_skb(alloc_size, iod, ld);
++		if (unlikely(!skb)) {
++			fragdata(iod, ld)->realloc_offset = continue_len;
++			return -ENOMEM;
++		}
++		fragdata(iod, ld)->skb_recv = skb;
++	}
++
++	while (rest) {
++		/* copy length cannot exceed rest_len */
++		len = min_t(int, rest_len, rest);
++		/* copy length should be under skb tailroom size */
++		len = min(len, skb_tailroom(skb));
++		/* when skb tailroom is bigger than MAX_RXDATA_SIZE
++		 * restrict its size to MAX_RXDATA_SIZE just for convinience */
++		len = min(len, MAX_RXDATA_SIZE);
++
++		/* copy bytes to skb */
++		memcpy(skb_put(skb, len), buf, len);
++
++		/* adjusting variables */
++		buf += len;
++		rest -= len;
++		done_len += len;
++		rest_len -= len;
++		hdr->frag_len += len;
++
++		/* check if it is final for this packet sequence */
++		if (!rest_len || !rest)
++			break;
++
++		/* more bytes are remain for this packet sequence
++		 * pass fully loaded skb to rx queue
++		 * and allocate another skb for continues data recv chain
++		 */
++		rx_iodev_skb(skb);
++		fragdata(iod, ld)->skb_recv =  NULL;
++
++		alloc_size = min(rest_len, MAX_RXDATA_SIZE);
++
++		skb = rx_alloc_skb(alloc_size, iod, ld);
++		if (unlikely(!skb)) {
++			fragdata(iod, ld)->realloc_offset = done_len;
++			return -ENOMEM;
++		}
++		fragdata(iod, ld)->skb_recv = skb;
++	}
++
++	mif_debug("rest : %d, alloc_size : %d , len : %d (%d)\n",
++				rest, alloc_size, skb->len, __LINE__);
++
++	return done_len;
++}
++
++static int rx_multi_fmt_frame(struct sk_buff *rx_skb)
++{
++	struct io_device *iod = skbpriv(rx_skb)->iod;
++	struct link_device *ld = skbpriv(rx_skb)->ld;
++	struct fmt_hdr *fh =
++		(struct fmt_hdr *)fragdata(iod, ld)->h_data.hdr;
++	unsigned int id = fh->control & 0x7F;
++	struct sk_buff *skb = iod->skb[id];
++	unsigned char *data = fragdata(iod, ld)->skb_recv->data;
++	unsigned int rcvd = fragdata(iod, ld)->skb_recv->len;
++
++	if (!skb) {
++		/* If there has been no multiple frame with this ID */
++		if (!(fh->control & 0x80)) {
++			/* It is a single frame because the "more" bit is 0. */
++			skb_queue_tail(&iod->sk_rx_q,
++					fragdata(iod, ld)->skb_recv);
++			mif_debug("wake up wq of %s\n", iod->name);
++			wake_up(&iod->wq);
++			return 0;
++		} else {
++			struct fmt_hdr *fh = NULL;
++			skb = rx_alloc_skb(MAX_MULTI_FMT_SIZE, iod, ld);
++			if (!skb) {
++				mif_err("<%d> alloc_skb fail\n",
++					__LINE__);
++				return -ENOMEM;
++			}
++			iod->skb[id] = skb;
++
++			fh = (struct fmt_hdr *)data;
++			mif_info("Start multi-frame (ID %d, len %d)",
++				id, fh->len);
++		}
++	}
++
++	/* Start multi-frame processing */
++
++	memcpy(skb_put(skb, rcvd), data, rcvd);
++	dev_kfree_skb_any(fragdata(iod, ld)->skb_recv);
++
++	if (fh->control & 0x80) {
++		/* The last frame has not arrived yet. */
++		mif_info("Receiving (ID %d, %d bytes)\n",
++			id, skb->len);
++	} else {
++		/* It is the last frame because the "more" bit is 0. */
++		mif_info("The Last (ID %d, %d bytes received)\n",
++			id, skb->len);
++		skb_queue_tail(&iod->sk_rx_q, skb);
++		iod->skb[id] = NULL;
++		mif_info("wake up wq of %s\n", iod->name);
++		wake_up(&iod->wq);
++	}
++
++	return 0;
++}
++
++static int rx_multi_fmt_frame_sipc42(struct sk_buff *rx_skb)
++{
++	struct io_device *iod = skbpriv(rx_skb)->iod;
++	struct link_device *ld = skbpriv(rx_skb)->ld;
++	struct fmt_hdr *fh =
++		(struct fmt_hdr *)fragdata(iod, ld)->h_data.hdr;
++	unsigned int    id = fh->control & 0x7F;
++	struct sk_buff *skb = iod->skb[id];
++	unsigned char  *data = fragdata(iod, ld)->skb_recv->data;
++	unsigned int    rcvd = fragdata(iod, ld)->skb_recv->len;
++
++	u8 ch;
++	struct io_device *real_iod = NULL;
++
++	ch = (fh->len & 0xC000) >> 14;
++	fh->len = fh->len & 0x3FFF;
++	real_iod = ld->fmt_iods[ch];
++	if (!real_iod) {
++		mif_err("wrong channel %d\n", ch);
++		return -1;
++	}
++	skbpriv(rx_skb)->real_iod = real_iod;
++
++	if (!skb) {
++		/* If there has been no multiple frame with this ID */
++		if (!(fh->control & 0x80)) {
++			/* It is a single frame because the "more" bit is 0. */
++			skb_queue_tail(&real_iod->sk_rx_q,
++					fragdata(iod, ld)->skb_recv);
++			mif_debug("wake up wq of %s\n", iod->name);
++			wake_up(&real_iod->wq);
++			return 0;
++		} else {
++			struct fmt_hdr *fh = NULL;
++			skb = rx_alloc_skb(MAX_MULTI_FMT_SIZE, real_iod, ld);
++			if (!skb) {
++				mif_err("alloc_skb fail\n");
++				return -ENOMEM;
++			}
++			real_iod->skb[id] = skb;
++
++			fh = (struct fmt_hdr *)data;
++			mif_err("Start multi-frame (ID %d, len %d)",
++				id, fh->len);
++		}
++	}
++
++	/* Start multi-frame processing */
++
++	memcpy(skb_put(skb, rcvd), data, rcvd);
++	dev_kfree_skb_any(fragdata(real_iod, ld)->skb_recv);
++
++	if (fh->control & 0x80) {
++		/* The last frame has not arrived yet. */
++		mif_err("Receiving (ID %d, %d bytes)\n",
++			id, skb->len);
++	} else {
++		/* It is the last frame because the "more" bit is 0. */
++		mif_err("The Last (ID %d, %d bytes received)\n",
++			id, skb->len);
++		skb_queue_tail(&real_iod->sk_rx_q, skb);
++		real_iod->skb[id] = NULL;
++		mif_info("wake up wq of %s\n", real_iod->name);
++		wake_up(&real_iod->wq);
++	}
++
++	return 0;
++}
++
++static int rx_iodev_skb_raw(struct sk_buff *skb)
++{
++	int err = 0;
++	struct io_device *iod = skbpriv(skb)->real_iod;
++	struct net_device *ndev = NULL;
++	struct iphdr *ip_header = NULL;
++	struct ethhdr *ehdr = NULL;
++	const char source[ETH_ALEN] = SOURCE_MAC_ADDR;
++
++	/* check the real_iod is open? */
++	/*
++	if (atomic_read(&iod->opened) == 0) {
++		mif_err("<%s> is not opened.\n",
++			iod->name);
++		pr_skb("drop packet", skb);
++		return -ENOENT;
++	}
++	*/
++
++	switch (iod->io_typ) {
++	case IODEV_MISC:
++		mif_debug("<%s> sk_rx_q.qlen = %d\n",
++			iod->name, iod->sk_rx_q.qlen);
++		skb_queue_tail(&iod->sk_rx_q, skb);
++		wake_up(&iod->wq);
++		return 0;
++
++	case IODEV_NET:
++		ndev = iod->ndev;
++		if (!ndev) {
++			mif_err("<%s> ndev == NULL",
++				iod->name);
++			return -EINVAL;
++		}
++
++		skb->dev = ndev;
++		ndev->stats.rx_packets++;
++		ndev->stats.rx_bytes += skb->len;
++
++		/* check the version of IP */
++		ip_header = (struct iphdr *)skb->data;
++		if (ip_header->version == IP6VERSION)
++			skb->protocol = htons(ETH_P_IPV6);
++		else
++			skb->protocol = htons(ETH_P_IP);
++
++		if (iod->use_handover) {
++			skb_push(skb, sizeof(struct ethhdr));
++			ehdr = (void *)skb->data;
++			memcpy(ehdr->h_dest, ndev->dev_addr, ETH_ALEN);
++			memcpy(ehdr->h_source, source, ETH_ALEN);
++			ehdr->h_proto = skb->protocol;
++			skb->ip_summed = CHECKSUM_UNNECESSARY;
++			skb_reset_mac_header(skb);
++
++			skb_pull(skb, sizeof(struct ethhdr));
++		}
++
++		if (in_hardirq())
++			err = netif_rx(skb);
++		else
++			err = netif_rx(skb);
++
++		if (err != NET_RX_SUCCESS)
++			dev_err(&ndev->dev, "rx error: %d\n", err);
++
++		return err;
++
++	default:
++		mif_err("wrong io_type : %d\n", iod->io_typ);
++		return -EINVAL;
++	}
++}
++
++static void rx_iodev_work(struct work_struct *work)
++{
++	int ret = 0;
++	struct sk_buff *skb = NULL;
++	struct io_device *iod = container_of(work, struct io_device,
++				rx_work.work);
++
++	while ((skb = skb_dequeue(&iod->sk_rx_q)) != NULL) {
++		ret = rx_iodev_skb_raw(skb);
++		if (ret < 0) {
++			mif_err("<%s> rx_iodev_skb_raw err = %d",
++				iod->name, ret);
++			dev_kfree_skb_any(skb);
++		} else if (ret == NET_RX_DROP) {
++			mif_err("<%s> ret == NET_RX_DROP\n",
++				iod->name);
++			schedule_delayed_work(&iod->rx_work,
++						msecs_to_jiffies(100));
++			break;
++		}
++	}
++}
++
++static int rx_multipdp(struct sk_buff *skb)
++{
++	u8 ch;
++	struct io_device *iod = skbpriv(skb)->iod;
++	struct link_device *ld = skbpriv(skb)->ld;
++	struct raw_hdr *raw_header =
++		(struct raw_hdr *)fragdata(iod, ld)->h_data.hdr;
++	struct io_device *real_iod = NULL;
++
++	ch = raw_header->channel;
++	if (ch == DATA_LOOPBACK_CHANNEL && ld->msd->loopback_ipaddr)
++		ch = RMNET0_CH_ID;
++
++	real_iod = link_get_iod_with_channel(ld, 0x20 | ch);
++	if (!real_iod) {
++		mif_err("wrong channel %d\n", ch);
++		return -1;
++	}
++
++	skbpriv(skb)->real_iod = real_iod;
++	skb_queue_tail(&iod->sk_rx_q, skb);
++	mif_debug("sk_rx_qlen:%d\n", iod->sk_rx_q.qlen);
++
++	schedule_delayed_work(&iod->rx_work, 0);
++	return 0;
++}
++
++/* de-mux function draft */
++static int rx_iodev_skb(struct sk_buff *skb)
++{
++	struct io_device *iod = skbpriv(skb)->iod;
++
++	switch (iod->format) {
++	case IPC_MULTI_RAW:
++		return rx_multipdp(skb);
++
++	case IPC_FMT:
++		if (iod->mc->mdm_data->ipc_version == SIPC_VER_42)
++			return rx_multi_fmt_frame_sipc42(skb);
++		else
++			return rx_multi_fmt_frame(skb);
++
++	case IPC_RFS:
++	default:
++		skb_queue_tail(&iod->sk_rx_q, skb);
++		mif_debug("wake up wq of %s\n", iod->name);
++		wake_up(&iod->wq);
++		return 0;
++	}
++}
++
++static int rx_hdlc_packet(struct io_device *iod, struct link_device *ld,
++		const char *data, unsigned recv_size)
++{
++	int rest = (int)recv_size;
++	char *buf = (char *)data;
++	int err = 0;
++	int len = 0;
++	unsigned rcvd = 0;
++
++	if (rest <= 0)
++		goto exit;
++
++	mif_debug("RX_SIZE = %d, ld: %s\n", rest, ld->name);
++
++	if (fragdata(iod, ld)->h_data.frag_len) {
++		/*
++		  If the fragdata(iod, ld)->h_data.frag_len field is
++		  not zero, there is a HDLC frame that is waiting for more data
++		  or HDLC_END in the skb (fragdata(iod, ld)->skb_recv).
++		  In this case, rx_hdlc_head_check() must be skipped.
++		*/
++		goto data_check;
++	}
++
++next_frame:
++	err = len = rx_hdlc_head_check(iod, ld, buf, rest);
++	if (err < 0)
++		goto exit;
++	mif_debug("check len : %d, rest : %d (%d)\n", len, rest,
++				__LINE__);
++
++	buf += len;
++	rest -= len;
++	if (rest <= 0)
++		goto exit;
++
++data_check:
++	/*
++	  If the return value of rx_hdlc_data_check() is zero, there remains
++	  only HDLC_END that will be received.
++	*/
++	err = len = rx_hdlc_data_check(iod, ld, buf, rest);
++	if (err < 0)
++		goto exit;
++	mif_debug("check len : %d, rest : %d (%d)\n", len, rest,
++				__LINE__);
++
++	buf += len;
++	rest -= len;
++
++	if (!rest && fragdata(iod, ld)->h_data.frag_len) {
++		/*
++		  Data is being received and more data or HDLC_END does not
++		  arrive yet, but there is no more data in the buffer. More
++		  data may come within the next frame from the link device.
++		*/
++		return 0;
++	} else if (rest <= 0)
++		goto exit;
++
++	/* At this point, one HDLC frame except HDLC_END has been received. */
++
++	err = len = rx_hdlc_tail_check(buf);
++	if (err < 0) {
++		mif_err("Wrong HDLC end: 0x%02X\n", *buf);
++		goto exit;
++	}
++	mif_debug("check len : %d, rest : %d (%d)\n", len, rest,
++				__LINE__);
++	buf += len;
++	rest -= len;
++
++	/* At this point, one complete HDLC frame has been received. */
++
++	/*
++	  The padding size is applied for the next HDLC frame. Zero will be
++	  returned by calc_padding_size() if the link device does not require
++	  4-byte aligned access.
++	*/
++	rcvd = get_hdlc_size(iod, fragdata(iod, ld)->h_data.hdr) +
++	       (SIZE_OF_HDLC_START + SIZE_OF_HDLC_END);
++	len = calc_padding_size(iod, ld, rcvd);
++	buf += len;
++	rest -= len;
++	if (rest < 0)
++		goto exit;
++
++	err = rx_iodev_skb(fragdata(iod, ld)->skb_recv);
++	if (err < 0)
++		goto exit;
++
++	/* initialize header & skb */
++	fragdata(iod, ld)->skb_recv = NULL;
++	memset(&fragdata(iod, ld)->h_data, 0x00,
++			sizeof(struct header_data));
++	fragdata(iod, ld)->realloc_offset = 0;
++
++	if (rest)
++		goto next_frame;
++
++exit:
++	/* free buffers. mipi-hsi re-use recv buf */
++
++	if (rest < 0)
++		err = -ERANGE;
++
++	if (err == -ENOMEM) {
++		if (!(fragdata(iod, ld)->h_data.frag_len))
++			memset(&fragdata(iod, ld)->h_data, 0x00,
++				sizeof(struct header_data));
++		return err;
++	}
++
++	if (err < 0 && fragdata(iod, ld)->skb_recv) {
++		dev_kfree_skb_any(fragdata(iod, ld)->skb_recv);
++		fragdata(iod, ld)->skb_recv = NULL;
++
++		/* clear headers */
++		memset(&fragdata(iod, ld)->h_data, 0x00,
++				sizeof(struct header_data));
++		fragdata(iod, ld)->realloc_offset = 0;
++	}
++
++	return err;
++}
++
++/* called from link device when a packet arrives for this io device */
++static int io_dev_recv_data_from_link_dev(struct io_device *iod,
++		struct link_device *ld, const char *data, unsigned int len)
++{
++	struct sk_buff *skb;
++	int err;
++	unsigned int alloc_size, rest_len;
++	char *cur;
++
++
++	/* check the iod(except IODEV_DUMMY) is open?
++	 * if the iod is MULTIPDP, check this data on rx_iodev_skb_raw()
++	 * because, we cannot know the channel no in here.
++	 */
++	/*
++	if (iod->io_typ != IODEV_DUMMY && atomic_read(&iod->opened) == 0) {
++		mif_err("<%s> is not opened.\n", iod->name);
++		pr_buffer("drop packet", data, len, 16u);
++		return -ENOENT;
++	}
++	*/
++
++	switch (iod->format) {
++	case IPC_FMT:
++	case IPC_RAW:
++	case IPC_RFS:
++	case IPC_MULTI_RAW:
++		if (iod->waketime)
++			wake_lock_timeout(&iod->wakelock, iod->waketime);
++		err = rx_hdlc_packet(iod, ld, data, len);
++		if (err < 0)
++			mif_err("fail process HDLC frame\n");
++		return err;
++
++	case IPC_CMD:
++		/* TODO- handle flow control command from CP */
++		return 0;
++
++	case IPC_BOOT:
++	case IPC_RAMDUMP:
++		/* save packet to sk_buff */
++		skb = rx_alloc_skb(len, iod, ld);
++		if (skb) {
++			mif_debug("boot len : %d\n", len);
++
++			memcpy(skb_put(skb, len), data, len);
++			skb_queue_tail(&iod->sk_rx_q, skb);
++			mif_debug("skb len : %d\n", skb->len);
++
++			wake_up(&iod->wq);
++			return len;
++		}
++		/* 32KB page alloc fail case, alloc 3.5K a page.. */
++		mif_info("(%d)page fail, alloc fragment pages\n", len);
++
++		rest_len = len;
++		cur = (char *)data;
++		while (rest_len) {
++			alloc_size = min_t(unsigned int, MAX_RXDATA_SIZE,
++				rest_len);
++			skb = rx_alloc_skb(alloc_size, iod, ld);
++			if (!skb) {
++				mif_err("fail alloc skb (%d)\n", __LINE__);
++				return -ENOMEM;
++			}
++			mif_debug("boot len : %d\n", alloc_size);
++
++			memcpy(skb_put(skb, alloc_size), cur, alloc_size);
++			skb_queue_tail(&iod->sk_rx_q, skb);
++			mif_debug("skb len : %d\n", skb->len);
++
++			rest_len -= alloc_size;
++			cur += alloc_size;
++		}
++		wake_up(&iod->wq);
++		return len;
++
++	default:
++		return -EINVAL;
++	}
++}
++
++/* inform the IO device that the modem is now online or offline or
++ * crashing or whatever...
++ */
++static void io_dev_modem_state_changed(struct io_device *iod,
++			enum modem_state state)
++{
++	struct modem_ctl *mc = iod->mc;
++	int old_state = mc->phone_state;
++
++	if (old_state != state) {
++		mc->phone_state = state;
++		mif_err("%s state changed (%s -> %s)\n", mc->name,
++			get_cp_state_str(old_state), get_cp_state_str(state));
++	}
++
++	if (state == STATE_CRASH_RESET || state == STATE_CRASH_EXIT ||
++	    state == STATE_NV_REBUILDING)
++		wake_up(&iod->wq);
++}
++
++/**
++ * io_dev_sim_state_changed
++ * @iod:	IPC's io_device
++ * @sim_online: SIM is online?
++ */
++static void io_dev_sim_state_changed(struct io_device *iod, bool sim_online)
++{
++
++	if (atomic_read(&iod->opened) == 0) {
++		mif_err("iod is not opened: %s\n", iod->name);
++		/* update latest sim status */
++		iod->mc->sim_state.online = sim_online;
++	}
++#if 1 /* HSIC + XMM6262 */
++	else if (iod->mc->phone_state == STATE_BOOTING) {
++		mif_err("modem_current_state is STATE_BOOTING\n");
++		/* update latest sim status */
++		iod->mc->sim_state.online = sim_online;
++	}
++#endif
++	else if (iod->mc->sim_state.online == sim_online) {
++		mif_err("sim state not changed.\n");
++	} else {
++		iod->mc->sim_state.online = sim_online;
++		iod->mc->sim_state.changed = true;
++		wake_lock_timeout(&iod->mc->bootd->wakelock,
++						iod->mc->bootd->waketime);
++		mif_err("sim state changed. (iod: %s, state: "
++				"[online=%d, changed=%d])\n",
++				iod->name, iod->mc->sim_state.online,
++				iod->mc->sim_state.changed);
++		wake_up(&iod->wq);
++	}
++}
++
++
++static int misc_open(struct inode *inode, struct file *filp)
++{
++	struct io_device *iod = to_io_device(filp->private_data);
++	struct modem_shared *msd = iod->msd;
++	struct link_device *ld;
++	int ret;
++	filp->private_data = (void *)iod;
++
++	mif_err("iod = %s\n", iod->name);
++	atomic_inc(&iod->opened);
++
++	list_for_each_entry(ld, &msd->link_dev_list, list) {
++		if (IS_CONNECTED(iod, ld) && ld->init_comm) {
++			ret = ld->init_comm(ld, iod);
++			if (ret < 0) {
++				mif_err("%s: init_comm error: %d\n",
++						ld->name, ret);
++				return ret;
++			}
++		}
++	}
++
++	return 0;
++}
++
++static int misc_release(struct inode *inode, struct file *filp)
++{
++	struct io_device *iod = (struct io_device *)filp->private_data;
++	struct modem_shared *msd = iod->msd;
++	struct link_device *ld;
++
++	mif_err("iod = %s\n", iod->name);
++	atomic_dec(&iod->opened);
++	skb_queue_purge(&iod->sk_rx_q);
++
++	list_for_each_entry(ld, &msd->link_dev_list, list) {
++		if (IS_CONNECTED(iod, ld) && ld->terminate_comm)
++			ld->terminate_comm(ld, iod);
++	}
++
++	return 0;
++}
++
++static unsigned int misc_poll(struct file *filp, struct poll_table_struct *wait)
++{
++	struct io_device *iod = (struct io_device *)filp->private_data;
++
++	poll_wait(filp, &iod->wq, wait);
++
++	if ((!skb_queue_empty(&iod->sk_rx_q)) &&
++	    (iod->mc->phone_state != STATE_OFFLINE)) {
++		return POLLIN | POLLRDNORM;
++	} else if ((iod->mc->phone_state == STATE_CRASH_RESET) ||
++			(iod->mc->phone_state == STATE_CRASH_EXIT) ||
++			(iod->mc->phone_state == STATE_NV_REBUILDING) ||
++#if defined(CONFIG_SEC_DUAL_MODEM_MODE)
++			(iod->mc->phone_state == STATE_MODEM_SWITCH) ||
++#endif
++			(iod->mc->sim_state.changed)) {
++		if (iod->format == IPC_RAW) {
++			msleep(20);
++			return 0;
++		}
++		return POLLHUP;
++	} else {
++		return 0;
++	}
++}
++
++static long misc_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
++{
++	int p_state;
++	struct io_device *iod = (struct io_device *)filp->private_data;
++	struct link_device *ld = get_current_link(iod);
++	char cpinfo_buf[530] = "CP Crash ";
++	char str[TASK_COMM_LEN];
++
++	mif_debug("cmd = 0x%x\n", cmd);
++
++	switch (cmd) {
++	case IOCTL_MODEM_ON:
++		mif_debug("%s: IOCTL_MODEM_ON\n", iod->name);
++		return iod->mc->ops.modem_on ? iod->mc->ops.modem_on(iod->mc) : -EINVAL;
++
++	case IOCTL_MODEM_OFF:
++		mif_debug("%s: IOCTL_MODEM_OFF\n", iod->name);
++		return iod->mc->ops.modem_off ? iod->mc->ops.modem_off(iod->mc) : -EINVAL;
++
++	case IOCTL_MODEM_RESET:
++		mif_debug("%s: IOCTL_MODEM_RESET\n", iod->name);
++		return iod->mc->ops.modem_reset ? iod->mc->ops.modem_reset(iod->mc) : -EINVAL;
++
++	case IOCTL_MODEM_BOOT_ON:
++		mif_debug("%s: IOCTL_MODEM_BOOT_ON\n", iod->name);
++		return iod->mc->ops.modem_boot_on ? iod->mc->ops.modem_boot_on(iod->mc) : -EINVAL;
++
++	case IOCTL_MODEM_BOOT_OFF:
++		mif_debug("%s: IOCTL_MODEM_BOOT_OFF\n", iod->name);
++		return iod->mc->ops.modem_boot_off ? iod->mc->ops.modem_boot_off(iod->mc) : -EINVAL;
++
++	/* TODO - will remove this command after ril updated */
++	case IOCTL_MODEM_BOOT_DONE:
++		mif_debug("%s: IOCTL_MODEM_BOOT_DONE\n", iod->name);
++		return 0;
++
++	case IOCTL_MODEM_STATUS:
++		mif_debug("%s: IOCTL_MODEM_STATUS\n", iod->name);
++
++		p_state = iod->mc->phone_state;
++		if ((p_state == STATE_CRASH_RESET) ||
++		    (p_state == STATE_CRASH_EXIT)) {
++			mif_err("<%s> send err state : %d\n",
++				iod->name, p_state);
++		} else if (iod->mc->sim_state.changed &&
++			!strcmp(get_task_comm(str, get_current()), "rild")) {
++			int s_state = iod->mc->sim_state.online ?
++					STATE_SIM_ATTACH : STATE_SIM_DETACH;
++			iod->mc->sim_state.changed = false;
++
++			mif_info("SIM states (%d) to %s\n", s_state, str);
++			return s_state;
++		} else if (p_state == STATE_NV_REBUILDING) {
++			mif_info("send nv rebuild state : %d\n",
++				p_state);
++			iod->mc->phone_state = STATE_ONLINE;
++		}
++		return p_state;
++
++	case IOCTL_MODEM_PROTOCOL_SUSPEND:
++		mif_info("%s: IOCTL_MODEM_PROTOCOL_SUSPEND\n", iod->name);
++
++		if (iod->format != IPC_MULTI_RAW)
++			return -EINVAL;
++
++		iodevs_for_each(iod->msd, iodev_netif_stop, 0);
++		return 0;
++
++	case IOCTL_MODEM_DL_START:
++		mif_info("%s: IOCTL_MODEM_DL_START\n", iod->name);
++		return ld->dload_start ? ld->dload_start(ld, iod) : -EINVAL;
++
++	case IOCTL_MODEM_FW_UPDATE:
++		mif_info("%s: IOCTL_MODEM_FW_UPDATE\n", iod->name);
++		return ld->firm_update ? ld->firm_update(ld, iod, arg) : -EINVAL;
++
++	case IOCTL_MODEM_PROTOCOL_RESUME:
++		mif_info("%s: IOCTL_MODEM_PROTOCOL_RESUME\n", iod->name);
++
++		if (iod->format != IPC_MULTI_RAW)
++			return -EINVAL;
++
++		iodevs_for_each(iod->msd, iodev_netif_wake, 0);
++		return 0;
++
++	case IOCTL_MODEM_DUMP_START:
++		mif_err("%s: IOCTL_MODEM_DUMP_START\n", iod->name);
++		return ld->dump_start ? ld->dump_start(ld, iod) : -EINVAL;
++
++	case IOCTL_MODEM_RAMDUMP_START:
++		mif_err("%s: IOCTL_MODEM_RAMDUMP_START\n", iod->name);
++		return ld->dump_start ? ld->dump_start(ld, iod) : -EINVAL;
++
++	case IOCTL_MODEM_DUMP_UPDATE:
++		mif_debug("%s: IOCTL_MODEM_DUMP_UPDATE\n", iod->name);
++		return ld->dump_update ? ld->dump_update(ld, iod, arg) : -EINVAL;
++
++	case IOCTL_MODEM_RAMDUMP_STOP:
++		mif_info("%s: IOCTL_MODEM_RAMDUMP_STOP\n", iod->name);
++		return ld->dump_finish ? ld->dump_finish(ld, iod, arg) : -EINVAL;
++
++	case IOCTL_MODEM_FORCE_CRASH_EXIT:
++		mif_debug("%s: IOCTL_MODEM_FORCE_CRASH_EXIT\n", iod->name);
++		if (iod->mc->ops.modem_force_crash_exit)
++			return iod->mc->ops.modem_force_crash_exit(iod->mc);
++		return -EINVAL;
++
++	case IOCTL_MODEM_CP_UPLOAD:
++		mif_err("%s: IOCTL_MODEM_CP_UPLOAD\n", iod->name);
++		/* Samsung panics the AP here to take a ramdump; just log the
++		 * CP's crash reason and let the RIL restart the modem */
++		if (copy_from_user(cpinfo_buf + strlen(cpinfo_buf),
++			(void __user *)arg, MAX_CPINFO_SIZE - 16) == 0) {
++			cpinfo_buf[sizeof(cpinfo_buf) - 1] = '\0';
++			mif_err("%s\n", cpinfo_buf);
++		}
++		return 0;
++
++	case IOCTL_MODEM_DUMP_RESET:
++		mif_err("%s: IOCTL_MODEM_DUMP_RESET\n", iod->name);
++		if (!iod->mc->ops.modem_dump_reset)
++			return -EINVAL;
++		return iod->mc->ops.modem_dump_reset(iod->mc);
++
++#if defined(CONFIG_SEC_DUAL_MODEM_MODE)
++	case IOCTL_MODEM_SWITCH_MODEM:
++		mif_err("%s: IOCTL_MODEM_SWITCH_MODEM\n", iod->name);
++		iod->mc->phone_state = STATE_MODEM_SWITCH;
++		wake_up(&iod->wq);
++		return 0;
++#endif
++
++	default:
++		 /* If you need to handle the ioctl for specific link device,
++		  * then assign the link ioctl handler to ld->ioctl
++		  * It will be call for specific link ioctl */
++		if (ld->ioctl)
++			return ld->ioctl(ld, iod, cmd, arg);
++
++		mif_err("%s: ioctl 0x%X is not defined\n", iod->name, cmd);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static size_t _boot_write(struct io_device *iod, const char __user *buf,
++								size_t count)
++{
++	int rest_len = count, frame_len = 0;
++	char *cur = (char *)buf;
++	struct sk_buff *skb = NULL;
++	struct link_device *ld = get_current_link(iod);
++	int ret;
++
++	while (rest_len) {
++		frame_len = min(rest_len, MAX_BOOTDATA_SIZE);
++		skb = alloc_skb(frame_len, GFP_KERNEL);
++		if (!skb) {
++			mif_err("fail alloc skb (%d)\n", __LINE__);
++			return -ENOMEM;
++		}
++		if (copy_from_user(
++				skb_put(skb, frame_len), cur, frame_len) != 0) {
++			dev_kfree_skb_any(skb);
++			return -EFAULT;
++		}
++		rest_len -= frame_len;
++		cur += frame_len;
++
++		skbpriv(skb)->iod = iod;
++		skbpriv(skb)->ld = ld;
++
++		ret = ld->send(ld, iod, skb);
++		if (ret < 0) {
++			dev_kfree_skb_any(skb);
++			return ret;
++		}
++	}
++	return count;
++}
++
++static ssize_t misc_write(struct file *filp, const char __user *buf,
++			size_t count, loff_t *ppos)
++{
++	struct io_device *iod = (struct io_device *)filp->private_data;
++	struct link_device *ld = get_current_link(iod);
++	int frame_len = 0;
++	char frame_header_buf[sizeof(struct raw_hdr)];
++	struct sk_buff *skb;
++	int err;
++	size_t tx_size;
++
++	/* TODO - check here flow control for only raw data */
++
++	frame_len = SIZE_OF_HDLC_START +
++		    get_header_size(iod) +
++		    count +
++		    SIZE_OF_HDLC_END;
++	if (ld->aligned)
++		frame_len += MAX_LINK_PADDING_SIZE;
++
++	skb = alloc_skb(frame_len, GFP_KERNEL);
++	if (!skb) {
++		if (frame_len > MAX_BOOTDATA_SIZE && iod->format == IPC_BOOT) {
++			mif_info("large alloc fail\n");
++			return _boot_write(iod, buf, count);
++		}
++		mif_err("fail alloc skb (%d)\n", __LINE__);
++		return -ENOMEM;
++	}
++
++	switch (iod->format) {
++	case IPC_BOOT:
++	case IPC_RAMDUMP:
++		if (copy_from_user(skb_put(skb, count), buf, count) != 0) {
++			dev_kfree_skb_any(skb);
++			return -EFAULT;
++		}
++		break;
++
++	case IPC_RFS:
++		memcpy(skb_put(skb, SIZE_OF_HDLC_START), hdlc_start,
++				SIZE_OF_HDLC_START);
++		if (copy_from_user(skb_put(skb, count), buf, count) != 0) {
++			dev_kfree_skb_any(skb);
++			return -EFAULT;
++		}
++		memcpy(skb_put(skb, SIZE_OF_HDLC_END), hdlc_end,
++					SIZE_OF_HDLC_END);
++		break;
++
++	default:
++		memcpy(skb_put(skb, SIZE_OF_HDLC_START), hdlc_start,
++				SIZE_OF_HDLC_START);
++		memcpy(skb_put(skb, get_header_size(iod)),
++			get_header(iod, count, frame_header_buf),
++			get_header_size(iod));
++		if (copy_from_user(skb_put(skb, count), buf, count) != 0) {
++			dev_kfree_skb_any(skb);
++			return -EFAULT;
++		}
++		memcpy(skb_put(skb, SIZE_OF_HDLC_END), hdlc_end,
++					SIZE_OF_HDLC_END);
++		break;
++	}
++
++	skb_put(skb, calc_padding_size(iod, ld, skb->len));
++
++	/* send data with sk_buff, link device will put sk_buff
++	 * into the specific sk_buff_q and run work-q to send data
++	 */
++	tx_size = skb->len;
++
++	skbpriv(skb)->iod = iod;
++	skbpriv(skb)->ld = ld;
++
++	err = ld->send(ld, iod, skb);
++	if (err < 0) {
++		dev_kfree_skb_any(skb);
++		return err;
++	}
++
++	if (err != tx_size)
++		mif_err("WARNNING: wrong tx size: %s, format=%d "
++			"count=%d, tx_size=%d, return_size=%d",
++			iod->name, iod->format, count, tx_size, err);
++
++	/* Temporaly enable t he RFS log for debugging IPC RX pedding issue */
++	if (iod->format == IPC_RFS)
++		mif_info("write rfs size = %d\n", count);
++
++	return count;
++}
++
++static ssize_t misc_read(struct file *filp, char *buf, size_t count,
++			loff_t *f_pos)
++{
++	struct io_device *iod = (struct io_device *)filp->private_data;
++	struct sk_buff *skb = NULL;
++	int pktsize = 0;
++	unsigned int rest_len, copy_len;
++	char *cur = buf;
++
++	skb = skb_dequeue(&iod->sk_rx_q);
++	if (!skb) {
++		mif_err("<%s> no data from sk_rx_q\n", iod->name);
++		return 0;
++	}
++	mif_debug("<%s> skb->len : %d\n", iod->name, skb->len);
++
++	if (iod->format == IPC_BOOT) {
++		pktsize = rest_len = count;
++		while (rest_len) {
++			if (skb->len > rest_len) {
++				/* BOOT device receviced rx data as serial
++				  stream, return data by User requested size */
++				mif_err("skb->len %d > count %d\n", skb->len,
++					rest_len);
++				pr_skb("BOOT-wRX", skb);
++				if (copy_to_user(cur, skb->data, rest_len)
++									!= 0) {
++					dev_kfree_skb_any(skb);
++					return -EFAULT;
++				}
++				cur += rest_len;
++				skb_pull(skb, rest_len);
++				if (skb->len) {
++					mif_info("queue-head, skb->len = %d\n",
++						skb->len);
++					skb_queue_head(&iod->sk_rx_q, skb);
++				}
++				mif_debug("return %u\n", rest_len);
++				return rest_len;
++			}
++
++			copy_len = min(rest_len, skb->len);
++			if (copy_to_user(cur, skb->data, copy_len) != 0) {
++				dev_kfree_skb_any(skb);
++				return -EFAULT;
++			}
++			cur += skb->len;
++			dev_kfree_skb_any(skb);
++			rest_len -= copy_len;
++
++			if (!rest_len)
++				break;
++
++			skb = skb_dequeue(&iod->sk_rx_q);
++			if (!skb) {
++				mif_err("<%s> %d / %d sk_rx_q\n", iod->name,
++					(count - rest_len), count);
++				return count - rest_len;
++			}
++		}
++	} else {
++		if (skb->len > count) {
++			mif_err("<%s> skb->len %d > count %d\n", iod->name,
++				skb->len, count);
++			dev_kfree_skb_any(skb);
++			return -EFAULT;
++		}
++		pktsize = skb->len;
++		if (copy_to_user(buf, skb->data, pktsize) != 0) {
++			dev_kfree_skb_any(skb);
++			return -EFAULT;
++		}
++		if (iod->format == IPC_FMT)
++			mif_debug("copied %d bytes to user\n", pktsize);
++
++		dev_kfree_skb_any(skb);
++	}
++	return pktsize;
++}
++
++static const struct file_operations misc_io_fops = {
++	.owner = THIS_MODULE,
++	.open = misc_open,
++	.release = misc_release,
++	.poll = misc_poll,
++	.unlocked_ioctl = misc_ioctl,
++	.write = misc_write,
++	.read = misc_read,
++};
++
++static int vnet_open(struct net_device *ndev)
++{
++	struct vnet *vnet = netdev_priv(ndev);
++	netif_start_queue(ndev);
++	atomic_inc(&vnet->iod->opened);
++	return 0;
++}
++
++static int vnet_stop(struct net_device *ndev)
++{
++	struct vnet *vnet = netdev_priv(ndev);
++	atomic_dec(&vnet->iod->opened);
++	netif_stop_queue(ndev);
++	return 0;
++}
++
++static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
++{
++	int ret = 0;
++	int headroom = 0;
++	int tailroom = 0;
++	struct sk_buff *skb_new = NULL;
++	struct vnet *vnet = netdev_priv(ndev);
++	struct io_device *iod = vnet->iod;
++	struct link_device *ld = get_current_link(iod);
++	struct raw_hdr hd;
++	struct iphdr *ip_header = NULL;
++
++	/* When use `handover' with Network Bridge,
++	 * user -> TCP/IP(kernel) -> bridge device -> TCP/IP(kernel) -> this.
++	 *
++	 * We remove the one ethernet header of skb before using skb->len,
++	 * because the skb has two ethernet headers.
++	 */
++	if (iod->use_handover) {
++		if (iod->id >= PSD_DATA_CHID_BEGIN &&
++			iod->id <= PSD_DATA_CHID_END)
++			skb_pull(skb, sizeof(struct ethhdr));
++	}
++
++	/* ip loop-back */
++	ip_header = (struct iphdr *)skb->data;
++	if (iod->msd->loopback_ipaddr &&
++		ip_header->daddr == iod->msd->loopback_ipaddr) {
++		swap(ip_header->saddr, ip_header->daddr);
++		hd.channel = DATA_LOOPBACK_CHANNEL;
++	} else {
++		hd.channel = iod->id & 0x1F;
++	}
++	hd.len = skb->len + sizeof(hd);
++	hd.control = 0;
++
++	headroom = sizeof(hd) + sizeof(hdlc_start);
++	tailroom = sizeof(hdlc_end);
++	if (ld->aligned)
++		tailroom += MAX_LINK_PADDING_SIZE;
++	if (skb_headroom(skb) < headroom || skb_tailroom(skb) < tailroom) {
++		skb_new = skb_copy_expand(skb, headroom, tailroom, GFP_ATOMIC);
++		/* skb_copy_expand success or not, free old skb from caller */
++		dev_kfree_skb_any(skb);
++		if (!skb_new)
++			return -ENOMEM;
++	} else
++		skb_new = skb;
++
++	memcpy(skb_push(skb_new, sizeof(hd)), &hd, sizeof(hd));
++	memcpy(skb_push(skb_new, sizeof(hdlc_start)), hdlc_start,
++				sizeof(hdlc_start));
++	memcpy(skb_put(skb_new, sizeof(hdlc_end)), hdlc_end, sizeof(hdlc_end));
++	skb_put(skb_new, calc_padding_size(iod, ld,  skb_new->len));
++
++	skbpriv(skb_new)->iod = iod;
++	skbpriv(skb_new)->ld = ld;
++
++	ret = ld->send(ld, iod, skb_new);
++	if (ret < 0) {
++		netif_stop_queue(ndev);
++		dev_kfree_skb_any(skb_new);
++		return NETDEV_TX_BUSY;
++	}
++
++	ndev->stats.tx_packets++;
++	ndev->stats.tx_bytes += skb->len;
++
++	return NETDEV_TX_OK;
++}
++
++static struct net_device_ops vnet_ops = {
++	.ndo_open = vnet_open,
++	.ndo_stop = vnet_stop,
++	.ndo_start_xmit = vnet_xmit,
++};
++
++static void vnet_setup(struct net_device *ndev)
++{
++	ndev->netdev_ops = &vnet_ops;
++	ndev->type = ARPHRD_PPP;
++	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
++	ndev->addr_len = 0;
++	ndev->hard_header_len = 0;
++	ndev->tx_queue_len = 1000;
++	ndev->mtu = ETH_DATA_LEN;
++	ndev->watchdog_timeo = 5 * HZ;
++}
++
++static void vnet_setup_ether(struct net_device *ndev)
++{
++	ndev->netdev_ops = &vnet_ops;
++	ndev->type = ARPHRD_ETHER;
++	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST | IFF_SLAVE;
++	ndev->addr_len = ETH_ALEN;
++	eth_hw_addr_random(ndev);
++	ndev->hard_header_len = 0;
++	ndev->tx_queue_len = 1000;
++	ndev->mtu = ETH_DATA_LEN;
++	ndev->watchdog_timeo = 5 * HZ;
++}
++
++int sipc4_init_io_device(struct io_device *iod)
++{
++	int ret = 0;
++	struct vnet *vnet;
++
++	/* Get modem state from modem control device */
++	iod->modem_state_changed = io_dev_modem_state_changed;
++
++	iod->sim_state_changed = io_dev_sim_state_changed;
++
++	/* Get data from link device */
++	iod->recv = io_dev_recv_data_from_link_dev;
++
++	/* Register misc or net device */
++	switch (iod->io_typ) {
++	case IODEV_MISC:
++		init_waitqueue_head(&iod->wq);
++		skb_queue_head_init(&iod->sk_rx_q);
++		INIT_DELAYED_WORK(&iod->rx_work, rx_iodev_work);
++
++		iod->miscdev.minor = MISC_DYNAMIC_MINOR;
++		iod->miscdev.name = iod->name;
++		iod->miscdev.fops = &misc_io_fops;
++
++		ret = misc_register(&iod->miscdev);
++		if (ret)
++			mif_err("failed to register misc io device : %s\n",
++						iod->name);
++
++		break;
++
++	case IODEV_NET:
++		skb_queue_head_init(&iod->sk_rx_q);
++		if (iod->use_handover)
++			iod->ndev = alloc_netdev(sizeof(struct vnet), iod->name, NET_NAME_UNKNOWN,
++						vnet_setup_ether);
++		else
++			iod->ndev = alloc_netdev(sizeof(struct vnet), iod->name, NET_NAME_UNKNOWN, vnet_setup);
++
++		if (!iod->ndev) {
++			mif_err("failed to alloc netdev\n");
++			return -ENOMEM;
++		}
++
++		ret = register_netdev(iod->ndev);
++		if (ret)
++			free_netdev(iod->ndev);
++
++		mif_debug("(iod:0x%p)\n", iod);
++		vnet = netdev_priv(iod->ndev);
++		mif_debug("(vnet:0x%p)\n", vnet);
++		vnet->iod = iod;
++
++		break;
++
++	case IODEV_DUMMY:
++		skb_queue_head_init(&iod->sk_rx_q);
++		INIT_DELAYED_WORK(&iod->rx_work, rx_iodev_work);
++
++		iod->miscdev.minor = MISC_DYNAMIC_MINOR;
++		iod->miscdev.name = iod->name;
++		iod->miscdev.fops = &misc_io_fops;
++
++		ret = misc_register(&iod->miscdev);
++		if (ret)
++			mif_err("failed to register misc io device : %s\n",
++						iod->name);
++		ret = device_create_file(iod->miscdev.this_device,
++				&attr_waketime);
++		if (ret)
++			mif_err("failed to create `waketime' file : %s\n",
++					iod->name);
++		ret = device_create_file(iod->miscdev.this_device,
++				&attr_loopback);
++		if (ret)
++			mif_err("failed to create `loopback file' : %s\n",
++					iod->name);
++		break;
++
++	default:
++		mif_err("wrong io_type : %d\n", iod->io_typ);
++		return -EINVAL;
++	}
++
++	mif_debug("%s(%d) : init_io_device() done : %d\n",
++				iod->name, iod->io_typ, ret);
++	return ret;
++}
++
+diff --git a/drivers/misc/modem_if/wakelock.h b/drivers/misc/modem_if/wakelock.h
+new file mode 100755
+index 000000000..f93e5b7fe
+--- /dev/null
++++ b/drivers/misc/modem_if/wakelock.h
+@@ -0,0 +1,48 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Android wakelock calls of the Samsung modem_if code, mapped onto wakeup sources
++ * (the wakelock API left the kernel with Android's own patches).
++ */
++#ifndef __MODEM_IF_WAKELOCK_H__
++#define __MODEM_IF_WAKELOCK_H__
++
++#include <linux/jiffies.h>
++#include <linux/pm_wakeup.h>
++
++#define WAKE_LOCK_SUSPEND	0
++
++struct wake_lock {
++	struct wakeup_source *ws;
++};
++
++static inline void wake_lock_init(struct wake_lock *lock, int type,
++				  const char *name)
++{
++	lock->ws = wakeup_source_register(NULL, name);
++}
++
++static inline void wake_lock_destroy(struct wake_lock *lock)
++{
++	wakeup_source_unregister(lock->ws);
++	lock->ws = NULL;
++}
++
++static inline void wake_lock(struct wake_lock *lock)
++{
++	if (lock->ws)
++		__pm_stay_awake(lock->ws);
++}
++
++static inline void wake_lock_timeout(struct wake_lock *lock, long timeout)
++{
++	if (lock->ws)
++		__pm_wakeup_event(lock->ws, jiffies_to_msecs(timeout));
++}
++
++static inline void wake_unlock(struct wake_lock *lock)
++{
++	if (lock->ws)
++		__pm_relax(lock->ws);
++}
++
++#endif
+-- 
+2.53.0
+

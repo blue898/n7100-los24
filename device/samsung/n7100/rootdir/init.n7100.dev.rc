@@ -1,0 +1,7 @@
+# Development builds only (N7100_DEVELOPMENT=true, see device.mk)
+on post-fs-data
+    # LineageOS keeps "Rooted debugging" in /data: after a data wipe, adb root right away
+    mkdir /data/adbroot 0700 root root
+    write /data/adbroot/enabled 1
+    # stay awake unless switched off explicitly
+    setprop persist.vendor.n7100.stay_awake ${persist.vendor.n7100.stay_awake:-1}

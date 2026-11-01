@@ -1,0 +1,34 @@
+// GNSS HAL for the Galaxy Note II: Samsung's legacy GPS HAL (gps.default.so, client of
+// Broadcom's gpsd for the BCM4752) behind the AIDL IGnss
+cc_binary {
+    name: "android.hardware.gnss-service.n7100",
+    relative_install_path: "hw",
+    vendor: true,
+    init_rc: ["gnss-n7100.rc"],
+    vintf_fragments: ["gnss-n7100.xml"],
+    defaults: ["gnss_use_latest_hal_aidl_ndk_shared"],
+    srcs: ["Gnss.cpp", "service.cpp"],
+    header_libs: ["libhardware_headers"],
+    shared_libs: ["libbase", "libbinder_ndk", "libhardware", "liblog", "libutils"],
+    cflags: ["-Wall", "-Werror"],
+}
+
+// What gpsd (2014) needs from KitKat's libgui and libwrappergps, and SSLv3_client_method;
+// its NEEDED entries for those point here (proprietary/README)
+cc_library_shared {
+    name: "libgps-compat",
+    vendor: true,
+    srcs: ["compat/gps_compat.cpp"],
+    shared_libs: ["libssl", "libutils"],
+    cflags: ["-Wall", "-Werror", "-Wno-unused-parameter"],
+}
+
+// Shell test of the GNSS HAL (debugging aid, not in PRODUCT_PACKAGES): test/gnss_test.cpp
+cc_binary {
+    name: "gnss-test-n7100",
+    vendor: true,
+    defaults: ["gnss_use_latest_hal_aidl_ndk_shared"],
+    srcs: ["test/gnss_test.cpp"],
+    shared_libs: ["libbinder_ndk"],
+    cflags: ["-Wall", "-Werror"],
+}

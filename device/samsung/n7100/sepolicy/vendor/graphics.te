@@ -1,0 +1,4 @@
+# Mesa finds its render node through libdrm's device enumeration: the sysfs uevent of the GPU
+# (lima) and of the display controller (exynos-drm); the display node itself it only stats
+r_dir_file({ appdomain -isolated_app_all bootanim surfaceflinger system_server }, sysfs_gpu)
+dontaudit { appdomain bootanim surfaceflinger system_server } graphics_device:chr_file getattr;

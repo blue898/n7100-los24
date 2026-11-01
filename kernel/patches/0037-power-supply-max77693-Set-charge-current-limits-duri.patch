@@ -1,0 +1,206 @@
+From 60652e58b3fe25cee51809e131cf2a5bcb2c30a3 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Sat, 4 May 2024 15:08:34 +0200
+Subject: [PATCH 37/89] power: supply: max77693: Set charge current limits
+ during init
+
+There are two charger current limit registers:
+
+- Fast charge current limit (which controls current going from the
+  charger to the battery);
+- CHGIN input current limit (which controls current going into the
+  charger through the cable).
+
+Add functions for setting both of the values, and set them to a
+safe default value of 500mA at initialization.
+
+The value for the fast charge current limit can be modified by setting
+the constant-charge-current-max-ua DT property of the battery node
+specified in the monitored-battery charger DT property; the CHGIN input
+current limit will be set up later in the charger detection mechanism
+(in the future, the INPUT_CURRENT_LIMIT property could also be made
+writeable for userspace control of the current limit, while keeping
+the actual current limit from the charger to the battery intact
+so that users don't accidentally blow up their batteries with a bad
+value).
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+Changes in v3:
+- Dropped CHARGER reg in favor of managing the registers directly
+
+Changes in v2:
+- Squashed mfd include register additions into this commit
+- Changed from custom fast charge current property to monitored-battery
+  (devm_power_supply_register call has been moved up as it is needed by
+  the DT init function now)
+- Changed to adapt to both current limit values being managed by the
+  CHARGER regulator
+---
+ drivers/power/supply/max77693_charger.c | 82 +++++++++++++++++++++----
+ include/linux/mfd/max77693-private.h    |  2 +
+ 2 files changed, 73 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/power/supply/max77693_charger.c b/drivers/power/supply/max77693_charger.c
+index 8f5e1eddc..a7e644620 100644
+--- a/drivers/power/supply/max77693_charger.c
++++ b/drivers/power/supply/max77693_charger.c
+@@ -26,6 +26,7 @@ struct max77693_charger {
+ 	u32 min_system_volt;
+ 	u32 thermal_regulation_temp;
+ 	u32 batttery_overcurrent;
++	u32 fast_charge_current;
+ 	u32 charge_input_threshold_volt;
+ };
+ 
+@@ -596,6 +597,48 @@ static int max77693_set_batttery_overcurrent(struct max77693_charger *chg,
+ 			CHG_CNFG_12_B2SOVRC_MASK, data);
+ }
+ 
++static int max77693_set_input_current_limit(struct max77693_charger *chg,
++		unsigned int uamp)
++{
++	unsigned int data;
++
++	if (uamp < 60000 || uamp > 2540000) {
++		dev_err(chg->dev, "Wrong value for input current limit");
++		return -EINVAL;
++	};
++
++	data = uamp / 20000; /* 20mA steps */
++
++	data <<= CHG_CNFG_09_CHGIN_ILIM_SHIFT;
++
++	dev_dbg(chg->dev, "Input current limit: %u (0x%x)\n", uamp, data);
++
++	return regmap_update_bits(chg->max77693->regmap,
++			MAX77693_CHG_REG_CHG_CNFG_09,
++			CHG_CNFG_09_CHGIN_ILIM_MASK, data);
++}
++
++static int max77693_set_fast_charge_current(struct max77693_charger *chg,
++		unsigned int uamp)
++{
++	unsigned int data;
++
++	if (uamp > 2100000) {
++		dev_err(chg->dev, "Wrong value for fast charge current\n");
++		return -EINVAL;
++	}
++
++	data = uamp / 33300; /* 0.1A/3 steps */
++
++	data <<= CHG_CNFG_02_CC_SHIFT;
++
++	dev_dbg(chg->dev, "Fast charge current: %u (0x%x)\n", uamp, data);
++
++	return regmap_update_bits(chg->max77693->regmap,
++			MAX77693_CHG_REG_CHG_CNFG_02,
++			CHG_CNFG_02_CC_MASK, data);
++}
++
+ static int max77693_set_charge_input_threshold_volt(struct max77693_charger *chg,
+ 		unsigned int uvolt)
+ {
+@@ -673,6 +716,15 @@ static int max77693_reg_init(struct max77693_charger *chg)
+ 	if (ret)
+ 		return ret;
+ 
++	ret = max77693_set_fast_charge_current(chg, chg->fast_charge_current);
++	if (ret)
++		return ret;
++
++	ret = max77693_set_input_current_limit(chg,
++				DEFAULT_FAST_CHARGE_CURRENT);
++	if (ret)
++		return ret;
++
+ 	return max77693_set_charge_input_threshold_volt(chg,
+ 			chg->charge_input_threshold_volt);
+ }
+@@ -681,6 +733,7 @@ static int max77693_reg_init(struct max77693_charger *chg)
+ static int max77693_dt_init(struct device *dev, struct max77693_charger *chg)
+ {
+ 	struct device_node *np = dev->of_node;
++	struct power_supply_battery_info *battery_info;
+ 
+ 	if (!np) {
+ 		dev_err(dev, "no charger OF node\n");
+@@ -708,11 +761,20 @@ static int max77693_dt_init(struct device *dev, struct max77693_charger *chg)
+ 		chg->charge_input_threshold_volt =
+ 			DEFAULT_CHARGER_INPUT_THRESHOLD_VOLT;
+ 
++	if (power_supply_get_battery_info(chg->charger, &battery_info) ||
++			!battery_info->constant_charge_current_max_ua)
++		chg->fast_charge_current = DEFAULT_FAST_CHARGE_CURRENT;
++	else
++		chg->fast_charge_current =
++			battery_info->constant_charge_current_max_ua;
++
+ 	return 0;
+ }
+ #else /* CONFIG_OF */
+ static int max77693_dt_init(struct device *dev, struct max77693_charger *chg)
+ {
++	chg->fast_charge_current = DEFAULT_FAST_CHARGE_CURRENT;
++
+ 	return 0;
+ }
+ #endif /* CONFIG_OF */
+@@ -732,6 +794,15 @@ static int max77693_charger_probe(struct platform_device *pdev)
+ 	chg->dev = &pdev->dev;
+ 	chg->max77693 = max77693;
+ 
++	psy_cfg.drv_data = chg;
++
++	chg->charger = devm_power_supply_register(&pdev->dev,
++						  &max77693_charger_desc,
++						  &psy_cfg);
++	if (IS_ERR(chg->charger))
++		return dev_err_probe(&pdev->dev, PTR_ERR(chg->charger),
++				     "failed: power supply register\n");
++
+ 	ret = max77693_dt_init(&pdev->dev, chg);
+ 	if (ret)
+ 		return ret;
+@@ -740,8 +811,6 @@ static int max77693_charger_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
+-	psy_cfg.drv_data = chg;
+-
+ 	ret = device_create_file(&pdev->dev, &dev_attr_fast_charge_timer);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "failed: create fast charge timer sysfs entry\n");
+@@ -761,15 +830,6 @@ static int max77693_charger_probe(struct platform_device *pdev)
+ 		goto err;
+ 	}
+ 
+-	chg->charger = devm_power_supply_register(&pdev->dev,
+-						  &max77693_charger_desc,
+-						  &psy_cfg);
+-	if (IS_ERR(chg->charger)) {
+-		dev_err(&pdev->dev, "failed: power supply register\n");
+-		ret = PTR_ERR(chg->charger);
+-		goto err;
+-	}
+-
+ 	return 0;
+ 
+ err:
+diff --git a/include/linux/mfd/max77693-private.h b/include/linux/mfd/max77693-private.h
+index 8e7c35b5e..973f929b9 100644
+--- a/include/linux/mfd/max77693-private.h
++++ b/include/linux/mfd/max77693-private.h
+@@ -145,6 +145,8 @@ enum max77693_pmic_reg {
+ #define DEFAULT_THERMAL_REGULATION_TEMP		100
+ /* microamps */
+ #define DEFAULT_BATTERY_OVERCURRENT		3500000
++/* microamps */
++#define DEFAULT_FAST_CHARGE_CURRENT		500000
+ /* microvolts */
+ #define DEFAULT_CHARGER_INPUT_THRESHOLD_VOLT	4300000
+ 
+-- 
+2.53.0
+

@@ -1,0 +1,170 @@
+From 825deb9919a2315cf715493169230d1798a33f25 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 13:35:48 +0100
+Subject: [PATCH] ARM: dts: n710x, misc: samsung-ssp, power: max17042: make
+ suspend usable
+
+Suspend/resume on the Galaxy Note II lost Wi-Fi and the sensor hub, and the
+fuel gauge woke the system again within seconds:
+
+- AP_MCU_RESET (gpy2-2) is a floating input in sleep mode and resets the
+  sensor hub MCU: keep its level (pin-con-pdn = PREV).
+- The Wi-Fi SDIO card was powered off in suspend; brcmfmac then re-probes on
+  resume and fails to register its out-of-band IRQ again ("Flags mismatch irq
+  ... brcmf_oob_intr"). Keep its power instead, which is also what Android
+  expects (Wi-Fi stays associated in suspend).
+- samsung-ssp: tell the MCU the AP sleeps/wakes up (Samsung's AP_STATUS_SLEEP
+  and AP_STATUS_WAKEUP), mask its IRQ in suspend, fetch data it announced
+  meanwhile and reset it if it lost its state.
+- max17042: in suspend only the critical SOC threshold should wake the
+  system, for every chip type; with the 1 % alerts armed the voltage based
+  VFSOC of the MAX17047 (no current sense) woke it up again and again while
+  charging.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/samsung/exynos4412-n710x.dtsi    | 17 ++++++-
+ drivers/misc/samsung-ssp.c                    | 47 +++++++++++++++++++
+ drivers/power/supply/max17042_battery.c       | 12 +++--
+ 3 files changed, 69 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index f9fe91072..66b984a8e 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -205,6 +205,11 @@ camera-flash {
+ 	};
+ };
+ 
++&sdhci_3 {
++	/delete-property/ cap-power-off-card;
++	keep-power-in-suspend;
++};
++
+ &s5c73m3 {
+ 	standby-gpios = <&gpm0 6 GPIO_ACTIVE_LOW>;   /* ISP_STANDBY */
+ 	vdda-supply = <&cam_vdda_reg>;
+@@ -313,7 +318,7 @@ sensorhub@18 {
+ 		reg = <0x18>;
+ 		interrupt-parent = <&gpx0>;
+ 		interrupts = <0 IRQ_TYPE_EDGE_FALLING>;
+-		pinctrl-0 = <&ssp_pins>;
++		pinctrl-0 = <&ssp_pins &ssp_reset_pin>;
+ 		pinctrl-names = "default";
+ 		mcu-ap-int-gpios = <&gpx0 0 GPIO_ACTIVE_HIGH>;
+ 		mcu-ap-int2-gpios = <&gpx2 1 GPIO_ACTIVE_HIGH>;
+@@ -326,7 +331,15 @@ sensorhub@18 {
+ 
+ &pinctrl_1 {
+ 	ssp_pins: ssp-pins {
+-		samsung,pins = "gpx0-0", "gpx0-2", "gpx2-1", "gpy2-2";
++		samsung,pins = "gpx0-0", "gpx0-2", "gpx2-1";
++		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
++	};
++
++	/* AP_MCU_RESET: in sleep mode the pin would float and reset the MCU */
++	ssp_reset_pin: ssp-reset-pin {
++		samsung,pins = "gpy2-2";
+ 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
++		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_PREV>;
++		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_NONE>;
+ 	};
+ };
+diff --git a/drivers/misc/samsung-ssp.c b/drivers/misc/samsung-ssp.c
+index 16468e4e7..57acb5f19 100755
+--- a/drivers/misc/samsung-ssp.c
++++ b/drivers/misc/samsung-ssp.c
+@@ -51,6 +51,8 @@
+ #define SSP_INST_REMOVE		0xa2
+ #define SSP_INST_CHANGE_DELAY	0xa4
+ #define SSP_FUSEROM		0x01
++#define SSP_AP_STATUS_WAKEUP	0xd1
++#define SSP_AP_STATUS_SLEEP	0xd2
+ 
+ /* MCU -> AP */
+ #define SSP_DEVICE_ID		0x55
+@@ -846,6 +848,50 @@ static int ssp_probe(struct i2c_client *client)
+ 	return ret;
+ }
+ 
++static int ssp_suspend(struct device *dev)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++	u8 cmd = SSP_AP_STATUS_SLEEP;
++
++	cancel_delayed_work_sync(&ssp->rescan_work);
++	flush_work(&ssp->reset_work);
++	ssp->ready = false;
++	mutex_lock(&ssp->cmd_lock);
++	/* like Samsung's driver: the MCU holds back data the AP would sleep through */
++	if (ssp->enabled)
++		ssp_ack_cmd(ssp, &cmd, 1);
++	mutex_unlock(&ssp->cmd_lock);
++	disable_irq(ssp->client->irq);
++	return 0;
++}
++
++static int ssp_resume(struct device *dev)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++	u8 cmd = SSP_AP_STATUS_WAKEUP;
++	int ret = 0;
++
++	enable_irq(ssp->client->irq);
++	mutex_lock(&ssp->cmd_lock);
++	if (ssp->enabled)
++		ret = ssp_ack_cmd(ssp, &cmd, 1);
++	mutex_unlock(&ssp->cmd_lock);
++	ssp->ready = true;
++	if (ret) {
++		/* the MCU lost its state while we slept: start it over with the same sensors */
++		schedule_work(&ssp->reset_work);
++		return 0;
++	}
++	/* data announced while the IRQ was off: its edge is gone */
++	if (!gpiod_get_value_cansleep(ssp->mcu_ap_int)) {
++		ssp_irq(ssp->client->irq, ssp);
++		ssp_irq_thread(ssp->client->irq, ssp);
++	}
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(ssp_pm_ops, ssp_suspend, ssp_resume);
++
+ static void ssp_remove(struct i2c_client *client)
+ {
+ 	struct ssp_data *ssp = i2c_get_clientdata(client);
+@@ -875,6 +921,7 @@ static struct i2c_driver ssp_driver = {
+ 		.name = "samsung-ssp",
+ 		.of_match_table = ssp_of_match,
+ 		.dev_groups = ssp_groups,
++		.pm = pm_sleep_ptr(&ssp_pm_ops),
+ 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+ 	},
+ 	.probe = ssp_probe,
+diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
+index b2dc015e5..dc6b106cb 100644
+--- a/drivers/power/supply/max17042_battery.c
++++ b/drivers/power/supply/max17042_battery.c
+@@ -1146,11 +1146,13 @@ static void max17042_enable_soc_alerts(struct max17042_chip *chip)
+ 
+ static void max17042_suspend_soc_alerts(struct max17042_chip *chip)
+ {
+-	if (chip->chip_type != MAXIM_DEVICE_TYPE_MAX17055)
+-		return;
+-
+-	regmap_update_bits(chip->regmap, MAX17055_Config2,
+-			   CFG2_DSOCI_BIT_ENBL, 0);
++	/*
++	 * The 1 % alerts would wake the system at every change of the SOC (and the voltage based
++	 * VFSOC jumps around while charging); only the critical level has to wake it up.
++	 */
++	if (chip->chip_type == MAXIM_DEVICE_TYPE_MAX17055)
++		regmap_update_bits(chip->regmap, MAX17055_Config2,
++				   CFG2_DSOCI_BIT_ENBL, 0);
+ 	max17042_set_critical_soc_threshold(chip);
+ }
+ 
+-- 
+2.53.0
+

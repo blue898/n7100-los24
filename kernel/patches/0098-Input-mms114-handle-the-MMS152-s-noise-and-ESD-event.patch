@@ -1,0 +1,200 @@
+From 92daf22c24c611573dd0c07b4b5be84f54e099a1 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 18:06:58 +0100
+Subject: [PATCH 98/99] Input: mms114 - handle the MMS152's noise and ESD
+ events, tell it about a charger
+
+Samsung's mms152_ts driver for the Galaxy Note II reacts to two special
+event packets of the MMS152 firmware that this driver passed on as touches
+of a "wrong type": 0x0E, the firmware entered its noise mode (acknowledged
+through register 0x30: stay while a charger is connected, leave otherwise),
+and 0x0F, an ESD event (the controller is reset). It also writes register
+0x33 whenever a charger is connected or removed, so the firmware filters
+the noise a charger couples into the panel harder.
+
+Without that, contacts get lost while swiping, especially when charging,
+and Android turns the rest of the swipe into a tap.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/input/touchscreen/mms114.c | 106 +++++++++++++++++++++++++++++
+ 1 file changed, 106 insertions(+)
+
+diff --git a/drivers/input/touchscreen/mms114.c b/drivers/input/touchscreen/mms114.c
+index 27911a9f4..33f54049a 100644
+--- a/drivers/input/touchscreen/mms114.c
++++ b/drivers/input/touchscreen/mms114.c
+@@ -13,8 +13,10 @@
+ #include <linux/input/mt.h>
+ #include <linux/input/touchscreen.h>
+ #include <linux/interrupt.h>
++#include <linux/power_supply.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/slab.h>
++#include <linux/workqueue.h>
+ 
+ /* Write only registers */
+ #define MMS114_MODE_CONTROL		0x01
+@@ -35,6 +37,15 @@
+ #define MMS152_FW_REV			0xE1
+ #define MMS152_COMPAT_GROUP		0xF2
+ 
++/*
++ * MMS152 (Samsung's mms152_ts driver): the firmware reports noise and ESD in the
++ * first byte of the event packet, and wants to know about a charger
++ */
++#define MMS152_NOISE_MODE		0x30	/* 1: stay (charger), 2: leave */
++#define MMS152_CHARGER			0x33	/* 1: connected, 2: not */
++#define MMS152_EVENT_NOISE		0x0E
++#define MMS152_EVENT_ESD		0x0F
++
+ /* Minimum delay time is 50us between stop and start signal of i2c */
+ #define MMS114_I2C_DELAY		50
+ 
+@@ -69,6 +80,12 @@ struct mms114_data {
+ 
+ 	/* Use cache data for mode control register(write only) */
+ 	u8			cache_mode_control;
++
++	/* MMS152 charger noise handling */
++	bool			charger;
++	struct notifier_block	psy_nb;
++	struct work_struct	charger_work;
++	struct work_struct	esd_work;
+ };
+ 
+ struct mms_chip {
+@@ -76,6 +93,7 @@ struct mms_chip {
+ 	int event_size;
+ 	bool has_config_regs;
+ 	int (*get_version)(struct mms114_data *data);
++	bool has_noise_events;
+ };
+ 
+ #define MMS114_FLAGS_ID_MASK		GENMASK(3, 0)
+@@ -240,6 +258,7 @@ static const struct mms_chip mms152_descriptor = {
+ 	.event_size = MMS114_EVENT_SIZE,
+ 	.has_config_regs = false,
+ 	.get_version = mms152_get_version,
++	.has_noise_events = true,
+ };
+ 
+ static const struct mms_chip mms345l_descriptor = {
+@@ -336,6 +355,22 @@ static irqreturn_t mms114_interrupt(int irq, void *dev_id)
+ 	if (error)
+ 		goto out;
+ 
++	if (data->chip->has_noise_events) {
++		u8 event = ((u8 *)touch)[0];
++
++		if (event == MMS152_EVENT_NOISE) {
++			/* the firmware entered its noise mode: keep it while charging */
++			dev_dbg(&client->dev, "noise mode (charger %d)\n", data->charger);
++			mms114_write_reg(data, MMS152_NOISE_MODE, data->charger ? 1 : 2);
++			goto out;
++		}
++		if (event == MMS152_EVENT_ESD) {
++			dev_warn(&client->dev, "ESD event, resetting\n");
++			schedule_work(&data->esd_work);
++			goto out;
++		}
++	}
++
+ 	for (index = 0; index < touch_size; index++) {
+ 		t = (struct mms114_touch *)((u8 *)touch + index * event_size);
+ 		unsigned int type = FIELD_GET(MMS114_FLAGS_TYPE_MASK, t->flags);
+@@ -457,6 +492,11 @@ static int mms114_start(struct mms114_data *data)
+ 		return error;
+ 	}
+ 
++	if (data->chip->has_noise_events) {
++		data->charger = power_supply_is_system_supplied() > 0;
++		mms114_write_reg(data, MMS152_CHARGER, data->charger ? 1 : 2);
++	}
++
+ 	enable_irq(client->irq);
+ 
+ 	return 0;
+@@ -478,6 +518,60 @@ static void mms114_stop(struct mms114_data *data)
+ 		dev_warn(&client->dev, "Failed to disable avdd: %d\n", error);
+ }
+ 
++/* A charger couples noise into the panel; the MMS152 filters harder when told */
++static void mms152_charger_work(struct work_struct *work)
++{
++	struct mms114_data *data = container_of(work, struct mms114_data, charger_work);
++	struct input_dev *input_dev = data->input_dev;
++	bool charger = power_supply_is_system_supplied() > 0;
++
++	mutex_lock(&input_dev->mutex);
++	if (charger != data->charger) {
++		data->charger = charger;
++		if (input_device_enabled(input_dev))
++			mms114_write_reg(data, MMS152_CHARGER, charger ? 1 : 2);
++	}
++	mutex_unlock(&input_dev->mutex);
++}
++
++static int mms152_psy_notify(struct notifier_block *nb, unsigned long event, void *ptr)
++{
++	struct mms114_data *data = container_of(nb, struct mms114_data, psy_nb);
++
++	if (event == PSY_EVENT_PROP_CHANGED)
++		schedule_work(&data->charger_work);
++	return NOTIFY_OK;
++}
++
++static void mms152_esd_work(struct work_struct *work)
++{
++	struct mms114_data *data = container_of(work, struct mms114_data, esd_work);
++	struct input_dev *input_dev = data->input_dev;
++	int id;
++
++	mutex_lock(&input_dev->mutex);
++	if (input_device_enabled(input_dev)) {
++		mms114_stop(data);
++		for (id = 0; id < MMS114_MAX_TOUCH; id++) {
++			input_mt_slot(input_dev, id);
++			input_mt_report_slot_inactive(input_dev);
++		}
++		input_mt_report_pointer_emulation(input_dev, true);
++		input_sync(input_dev);
++		mms114_start(data);
++	}
++	mutex_unlock(&input_dev->mutex);
++}
++
++static void mms152_cleanup(void *_data)
++{
++	struct mms114_data *data = _data;
++
++	power_supply_unreg_notifier(&data->psy_nb);
++	cancel_work_sync(&data->charger_work);
++	cancel_work_sync(&data->esd_work);
++}
++
+ static int mms114_input_open(struct input_dev *dev)
+ {
+ 	struct mms114_data *data = input_get_drvdata(dev);
+@@ -654,6 +748,18 @@ static int mms114_probe(struct i2c_client *client)
+ 		return error;
+ 	}
+ 
++	INIT_WORK(&data->charger_work, mms152_charger_work);
++	INIT_WORK(&data->esd_work, mms152_esd_work);
++	if (data->chip->has_noise_events) {
++		data->psy_nb.notifier_call = mms152_psy_notify;
++		error = power_supply_reg_notifier(&data->psy_nb);
++		if (error)
++			return error;
++		error = devm_add_action_or_reset(&client->dev, mms152_cleanup, data);
++		if (error)
++			return error;
++	}
++
+ 	error = devm_request_threaded_irq(&client->dev, client->irq,
+ 					  NULL, mms114_interrupt,
+ 					  IRQF_ONESHOT | IRQF_NO_AUTOEN,
+-- 
+2.53.0
+

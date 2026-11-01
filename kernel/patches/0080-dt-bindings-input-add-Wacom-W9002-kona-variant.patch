@@ -1,0 +1,25 @@
+From d68712754efc44dc9e55b70cda94f7efd1adfb56 Mon Sep 17 00:00:00 2001
+From: Ferass El Hafidi <funderscore@postmarketos.org>
+Date: Wed, 14 Jan 2026 19:02:07 +0000
+Subject: [PATCH 80/89] dt-bindings: input: add Wacom W9002 kona variant
+
+Signed-off-by: Ferass El Hafidi <funderscore@postmarketos.org>
+---
+ .../devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml b/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
+index 6d1da6a43..fd8810c95 100644
+--- a/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/wacom,w9007a-lt03.yaml
+@@ -24,6 +24,7 @@ properties:
+       - wacom,w9002
+       - wacom,w9007a-lt03
+       - wacom,w9007a-v1
++      - wacom,w9002-kona
+ 
+   reg:
+     maxItems: 1
+-- 
+2.53.0
+

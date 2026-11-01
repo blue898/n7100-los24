@@ -1,0 +1,47 @@
+From bfecf257a72c7a66244781aa2213355967bebdd5 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Mon, 27 May 2024 19:20:43 +0200
+Subject: [PATCH 35/89] dt-bindings: power: supply: max77693: Add
+ monitored-battery property
+
+Add the monitored-battery property, so that its constant charge current
+property can be used to specify the current limit to use for fast charge
+(when plugged into a wall charger).
+
+Reviewed-by: Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+Changes in v2:
+- Switched to monitored-battery property from separate fast charge
+  current property
+---
+ .../devicetree/bindings/power/supply/maxim,max77693.yaml | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml b/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml
+index f5fd53deb..2f4437daf 100644
+--- a/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml
++++ b/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml
+@@ -16,10 +16,19 @@ description: |
+   See also Documentation/devicetree/bindings/mfd/maxim,max77693.yaml for
+   additional information and example.
+ 
++allOf:
++  - $ref: power-supply.yaml#
++
+ properties:
+   compatible:
+     const: maxim,max77693-charger
+ 
++  monitored-battery:
++    description:
++      Phandle to "simple-battery"-compatible battery node.
++      The constant-charge-current-max-microamps property of the battery
++      node is used to specify the fast charge current.
++
+   maxim,constant-microvolt:
+     description: |
+       Battery constant voltage in uV. The charger will operate in fast
+-- 
+2.53.0
+

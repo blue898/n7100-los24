@@ -1,0 +1,40 @@
+From abd47fcc9bcfabfaee64d1811fc943ae79b84d3d Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Tue, 30 Jul 2024 17:01:03 +0200
+Subject: [PATCH 50/89] ARM: dts: samsung: exynos4412-midas: Add USB connector
+ node
+
+Add a subnode to the MAX77693 MFD for the MUIC and connect the USB
+connector node to the charger to allow for charger type/OTG cable
+detection.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-midas.dtsi | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+index b69023a7c..5acc0d87a 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+@@ -187,7 +187,7 @@ max77693_pmic: pmic@66 {
+ 			muic {
+ 				compatible = "maxim,max77693-muic";
+ 
+-				connector {
++				usb_conn: connector {
+ 					compatible = "samsung,usb-connector-11pin",
+ 						     "usb-b-connector";
+ 					label = "micro-USB";
+@@ -245,6 +245,8 @@ charger {
+ 				maxim,thermal-regulation-celsius = <100>;
+ 				maxim,battery-overcurrent-microamp = <3500000>;
+ 				maxim,charge-input-threshold-microvolt = <4300000>;
++
++				maxim,usb-connector = <&usb_conn>;
+ 			};
+ 		};
+ 	};
+-- 
+2.53.0
+

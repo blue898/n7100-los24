@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Note II camera HAL (fork of AOSP's external camera HAL), read from /vendor/etc/camera -->
+<ExternalCamera>
+    <Provider>
+        <!-- the parser stops at a missing ignore list -->
+        <ignore/>
+    </Provider>
+    <Device>
+        <MaxJpegBufferSize bytes="5242880"/>
+        <NumVideoBuffers count="4"/>
+        <NumStillBuffers count="2"/>
+        <!-- Every frame is scaled and converted in software: stay at or below 3 MP -->
+        <FpsList>
+            <Limit width="2304" height="1440" fpsBound="30.0"/>
+        </FpsList>
+    </Device>
+</ExternalCamera>

@@ -1,0 +1,86 @@
+From 08ad76bfca189703aa810cc618f0244f61e283bf Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Thu, 20 Jul 2023 12:27:10 +0100
+Subject: [PATCH 11/89] ARM: dts: exynos: move ldo25 regulator node from dtsi
+ to dts files
+
+In vendor kernel [1], particularly line 472, we see that the min and
+max microvolt for the ldo25 regulator on i9300 and i9305 (which have
+CONFIG_REGULATOR_MAX77686 enabled) should be 3300000, not 2800000
+(which it is for the Reference Device PQ aka trats2), so ldo25 data
+needs to be moved out of the galaxy-s3 dtsi and into i9300, i9305 and
+trats2 dts files.  Also the name for ldo25 for RDPQ/trats2 is
+different.
+
+[1] https://github.com/LineageOS/android_kernel_samsung_smdk4412/blob/cm-14.1/arch/arm/mach-exynos/midas-power.c#L276-L713
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-galaxy-s3.dtsi | 6 ------
+ arch/arm/boot/dts/samsung/exynos4412-i9300.dts      | 6 ++++++
+ arch/arm/boot/dts/samsung/exynos4412-i9305.dts      | 6 ++++++
+ arch/arm/boot/dts/samsung/exynos4412-trats2.dts     | 6 ++++++
+ 4 files changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-galaxy-s3.dtsi b/arch/arm/boot/dts/samsung/exynos4412-galaxy-s3.dtsi
+index 3248be990..7bd55d8ab 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-galaxy-s3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-galaxy-s3.dtsi
+@@ -146,12 +146,6 @@ touchscreen@48 {
+ 	};
+ };
+ 
+-&ldo25_reg {
+-	regulator-name = "LCD_VCC_3.3V";
+-	regulator-min-microvolt = <2800000>;
+-	regulator-max-microvolt = <2800000>;
+-};
+-
+ &pinctrl_0 {
+ 	camera_flash_host: camera-flash-host-pins {
+ 		samsung,pins = "gpj1-0";
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-i9300.dts b/arch/arm/boot/dts/samsung/exynos4412-i9300.dts
+index b79d456e9..4bce58060 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-i9300.dts
++++ b/arch/arm/boot/dts/samsung/exynos4412-i9300.dts
+@@ -25,3 +25,9 @@ memory@40000000 {
+ &sound {
+ 	fm-sel-gpios = <&gpl0 3 GPIO_ACTIVE_HIGH>;
+ };
++
++&ldo25_reg {
++	regulator-name = "LCD_VCC_3.3V";
++	regulator-min-microvolt = <3300000>;
++	regulator-max-microvolt = <3300000>;
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-i9305.dts b/arch/arm/boot/dts/samsung/exynos4412-i9305.dts
+index 1048ef5d9..8e6c462b3 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-i9305.dts
++++ b/arch/arm/boot/dts/samsung/exynos4412-i9305.dts
+@@ -19,3 +19,9 @@ &i2c0_bus {
+ 	/* SCL and SDA pins are swapped */
+ 	samsung,pins = "gpd1-1", "gpd1-0";
+ };
++
++&ldo25_reg {
++	regulator-name = "LCD_VCC_3.3V";
++	regulator-min-microvolt = <3300000>;
++	regulator-max-microvolt = <3300000>;
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-trats2.dts b/arch/arm/boot/dts/samsung/exynos4412-trats2.dts
+index 3c2d2a783..ce68a1212 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-trats2.dts
++++ b/arch/arm/boot/dts/samsung/exynos4412-trats2.dts
+@@ -27,3 +27,9 @@ chosen {
+ 		stdout-path = "serial2:115200n8";
+ 	};
+ };
++
++&ldo25_reg {
++	regulator-name = "LED_A_2.8V";
++	regulator-min-microvolt = <2800000>;
++	regulator-max-microvolt = <2800000>;
++};
+-- 
+2.53.0
+

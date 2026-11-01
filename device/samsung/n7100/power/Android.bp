@@ -1,0 +1,26 @@
+// Power HAL for the Galaxy Note II: AOSP's example HAL (hint sessions, channels) with
+// real boosts and modes (Booster: cpufreq/devfreq floors and caps)
+cc_binary {
+    name: "android.hardware.power-service.n7100",
+    defaults: ["android.hardware.power-ndk_shared"],
+    relative_install_path: "hw",
+    init_rc: ["power-n7100.rc"],
+    vintf_fragments: ["power-default.xml"],
+    vendor: true,
+    shared_libs: [
+        "android.hardware.common-V2-ndk",
+        "android.hardware.common.fmq-V1-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libfmq",
+        "libutils",
+    ],
+    srcs: [
+        "Booster.cpp",
+        "main.cpp",
+        "Power.cpp",
+        "PowerHintSession.cpp",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}

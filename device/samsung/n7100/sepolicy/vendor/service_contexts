@@ -1,0 +1,3 @@
+mapper/minigbm                                                     u:object_r:hal_graphics_mapper_service:s0
+# the software gatekeeper's shared secret instance (as on Cuttlefish)
+android.hardware.security.sharedsecret.ISharedSecret/gatekeeper    u:object_r:hal_gatekeeper_service:s0

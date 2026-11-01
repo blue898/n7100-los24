@@ -1,0 +1,4 @@
+# persist.vendor.n7100.stay_awake (development option): a wake lock through /sys/power
+allow vendor_init self:capability2 block_suspend;
+# restorecon_recursive /efs: the Wi-Fi and Bluetooth MAC files there are labelled already
+dontaudit vendor_init { wifi_data_file bluetooth_data_file }:file getattr;

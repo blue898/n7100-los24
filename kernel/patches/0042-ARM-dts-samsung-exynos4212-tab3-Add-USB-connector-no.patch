@@ -1,0 +1,49 @@
+From e92917fb94c89e85ccf317558b35feb9b4a8290b Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Mon, 27 May 2024 19:25:50 +0200
+Subject: [PATCH 42/89] ARM: dts: samsung: exynos4212-tab3: Add USB connector
+ node
+
+Add a subnode to the MAX77693 MFD for the MUIC and connect the USB
+connector node to the charger to allow for charger type/OTG cable
+detection.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 784e3b95e..3bfd35932 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -157,6 +157,17 @@ charger_reg: CHARGER {
+ 				};
+ 			};
+ 
++			muic {
++				compatible = "maxim,max77693-muic";
++
++				usb_conn: connector {
++					compatible = "samsung,usb-connector-11pin",
++						     "usb-b-connector";
++					label = "micro-USB";
++					type = "micro";
++				};
++			};
++
+ 			charger {
+ 				compatible = "maxim,max77693-charger";
+ 				monitored-battery = <&battery>;
+@@ -166,6 +177,8 @@ charger {
+ 				maxim,thermal-regulation-celsius = <100>;
+ 				maxim,battery-overcurrent-microamp = <3500000>;
+ 				maxim,charge-input-threshold-microvolt = <4300000>;
++
++				maxim,usb-connector = <&usb_conn>;
+ 			};
+ 		};
+ 	};
+-- 
+2.53.0
+

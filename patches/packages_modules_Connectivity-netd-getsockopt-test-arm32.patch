@@ -1,0 +1,14 @@
+diff --git a/bpf/netd/BpfHandler.cpp b/bpf/netd/BpfHandler.cpp
+index 9b57548..172f8f6 100644
+--- a/bpf/netd/BpfHandler.cpp
++++ b/bpf/netd/BpfHandler.cpp
+@@ -85,6 +85,9 @@ static Result<void> checkProgramAccessible(const char* programPath) {
+ }
+ 
+ static void getsockoptTest() {
++    // n7100: 32-bit-only ARM; the netd getsockopt hook (drop reasons) isn't usable there
++    if (bpf::isKernel32Bit()) return;
++
+     // getsockopt bpf hook is not called if the device is running in compat mode.
+     if (isKernel64Bit() != isUserspace64bit() && !isAtLeastKernelVersion(6, 13)) return;
+ 

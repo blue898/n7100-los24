@@ -1,0 +1,58 @@
+From 515e0dc32a193527f4efee8fc729d4c68c217ba6 Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Thu, 12 Dec 2024 23:27:50 +0000
+Subject: [PATCH 61/89] media: exynos4-is: Fix mipi-csis entity type
+
+Enable resolutions and formats to be shown in `media-ctl -p`, to help with
+constructing valid media pipelines:
+
+Before:
+```
+- entity 17: s5p-mipi-csis.0 (2 pads, 5 links)
+             type Node subtype V4L flags 0
+             device node name /dev/v4l-subdev2
+	pad0: SINK
+		<- "S5C73M3-OIF":2 [ENABLED,IMMUTABLE]
+	pad1: SOURCE
+		-> "FIMC.0":0 []
+		-> "FIMC.1":0 []
+		-> "FIMC-LITE.0":0 []
+		-> "FIMC-LITE.1":0 []
+```
+After:
+```
+- entity 17: s5p-mipi-csis.0 (2 pads, 5 links, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev2
+	pad0: SINK
+		[stream:0 fmt:VYUY8_2X8/1536x864]
+		<- "S5C73M3-OIF":2 [ENABLED,IMMUTABLE]
+	pad1: SOURCE
+		[stream:0 fmt:VYUY8_2X8/1536x864]
+		-> "FIMC.0":0 []
+		-> "FIMC.1":0 []
+		-> "FIMC-LITE.0":0 []
+		-> "FIMC-LITE.1":0 []
+```
+Suggested-by: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ drivers/media/platform/samsung/exynos4-is/mipi-csis.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/samsung/exynos4-is/mipi-csis.c b/drivers/media/platform/samsung/exynos4-is/mipi-csis.c
+index 452880b53..a8ffd91fe 100644
+--- a/drivers/media/platform/samsung/exynos4-is/mipi-csis.c
++++ b/drivers/media/platform/samsung/exynos4-is/mipi-csis.c
+@@ -849,7 +849,7 @@ static int s5pcsis_probe(struct platform_device *pdev)
+ 	state->format.width = S5PCSIS_DEF_PIX_WIDTH;
+ 	state->format.height = S5PCSIS_DEF_PIX_HEIGHT;
+ 
+-	state->sd.entity.function = MEDIA_ENT_F_IO_V4L;
++	state->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
+ 	state->pads[CSIS_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+ 	state->pads[CSIS_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+ 	ret = media_entity_pads_init(&state->sd.entity,
+-- 
+2.53.0
+

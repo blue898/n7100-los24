@@ -1,0 +1,40 @@
+From 179e4952fcdfc607df3b7f4df202404f69a54908 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 21:10:09 +0100
+Subject: [PATCH 103/104] wifi: brcmfmac: load the WCC vendor module as a soft
+ dependency
+
+brcmfmac request_module()s its firmware vendor module (brcmfmac-wcc for
+the BCM4334) only when the chip attaches. Android has no request_module()
+helper: ueventd loads brcmfmac by its SDIO alias at boot and the attach
+fails ("brcmf_fwvid_request_module: mod=wcc: failed -2") unless something
+else happened to load brcmfmac-wcc within the ~0.7 s the firmware load
+takes. Declare it as a post soft dependency, so module loaders that
+honour softdeps (libmodprobe, modprobe) load it right after the core.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+index b6027d83e..d86ce2a9e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -24,6 +24,13 @@
+ MODULE_AUTHOR("Broadcom Corporation");
+ MODULE_DESCRIPTION("Broadcom 802.11 wireless LAN fullmac driver.");
+ MODULE_LICENSE("Dual BSD/GPL");
++/*
++ * The firmware vendor part is request_module()d when the chip attaches. Where nothing
++ * services request_module() (Android loads modules itself, by alias and soft
++ * dependency), it would never arrive: have WCC, the vendor of the older SDIO chips,
++ * loaded right after the core instead.
++ */
++MODULE_SOFTDEP("post: brcmfmac-wcc");
+ 
+ #define BRCMF_DEFAULT_SCAN_CHANNEL_TIME	40
+ #define BRCMF_DEFAULT_SCAN_UNASSOC_TIME	40
+-- 
+2.53.0
+

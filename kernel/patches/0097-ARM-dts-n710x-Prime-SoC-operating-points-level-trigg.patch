@@ -1,0 +1,75 @@
+From 98b258e88c1a3c513de924dbed6e426d997664a9 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 18:04:48 +0100
+Subject: [PATCH 97/99] ARM: dts: n710x: Prime SoC operating points,
+ level-triggered touchscreen IRQ
+
+The Note II has the Exynos 4412 Prime (SoC revision 2.0), which Samsung
+ran at up to 1.6 GHz with a 533 MHz Mali-400. Add the operating points of
+exynos4412-prime.dtsi (including it doesn't work here: its cooling maps
+reference thermal zones this tree doesn't have). Its 1.7 GHz point is
+beyond Samsung's 1.6 GHz for this device, so it is boost-only (turbo-mode).
+
+The MMS152 touchscreen holds INT low until the event packet is read. With an
+edge trigger, an event that arrives before the handler has read the previous
+one produces no new edge; the contact gets lost and Android turns a swipe
+into a tap. Samsung's driver requested the interrupt level-low as well.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/samsung/exynos4412-n710x.dtsi    | 35 ++++++++++++++++++-
+ 1 file changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 8fe55e0e7..de0908edb 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -190,7 +190,9 @@ touchscreen@48 {
+ 		compatible = "melfas,mms152";
+ 		reg = <0x48>;
+ 		interrupt-parent = <&gpm2>;
+-		interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
++		/* level, as Samsung: the MMS152 holds INT low until read; a new event in the
++		 * meantime gives no new edge, the contact is lost and Android sees a tap */
++		interrupts = <3 IRQ_TYPE_LEVEL_LOW>;
+ 		touchscreen-size-x = <720>;
+ 		touchscreen-size-y = <1280>;
+ 		avdd-supply = <&ldo23_reg>;
+@@ -363,3 +365,34 @@ ssp_reset_pin: ssp-reset-pin {
+ 		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_NONE>;
+ 	};
+ };
++
++/*
++ * The Note II has the Exynos 4412 Prime (SoC revision 2.0), which Samsung ran at up to
++ * 1.6 GHz with a 533 MHz Mali: the operating points of exynos4412-prime.dtsi (its
++ * cooling maps don't apply to this tree's thermal zones). 1.7 GHz is beyond Samsung's
++ * 1.6 GHz for this device: boost only (cpufreq/boost).
++ */
++&cpu0_opp_1500 {
++	/delete-property/turbo-mode;
++};
++
++&cpu0_opp_table {
++	opp-1600000000 {
++		opp-hz = /bits/ 64 <1600000000>;
++		opp-microvolt = <1350000>;
++		clock-latency-ns = <200000>;
++	};
++	opp-1704000000 {
++		opp-hz = /bits/ 64 <1704000000>;
++		opp-microvolt = <1350000>;
++		clock-latency-ns = <200000>;
++		turbo-mode;
++	};
++};
++
++&gpu_opp_table {
++	opp-533000000 {
++		opp-hz = /bits/ 64 <533000000>;
++		opp-microvolt = <1075000>;
++	};
++};
+-- 
+2.53.0
+

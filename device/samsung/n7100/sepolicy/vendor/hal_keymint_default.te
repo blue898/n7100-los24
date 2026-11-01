@@ -1,0 +1,2 @@
+# the software KeyMint looks for the serial number for attestation IDs: none provisioned
+dontaudit hal_keymint_default serialno_prop:file r_file_perms;

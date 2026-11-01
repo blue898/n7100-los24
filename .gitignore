@@ -1,0 +1,9 @@
+# Samsung blobs and firmware (tools/extract-blobs.sh), the kernel build (tools/build-kernel.sh),
+# n7100tool (tools/build-android.sh): generated, not redistributable or not source
+/device/samsung/n7100/proprietary/bin/
+/device/samsung/n7100/proprietary/lib/
+/device/samsung/n7100/proprietary/etc/
+/device/samsung/n7100/prebuilt/
+/device/samsung/n7100/adb_keys
+/n7100tool/target/
+/out/

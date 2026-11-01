@@ -1,0 +1,37 @@
+From 10252505135a8bec387940178786f5d7a57e2c99 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Sat, 27 Jul 2024 11:51:47 +0200
+Subject: [PATCH 43/89] ARM: dts: exynos4212-tab3: Drop CHARGER regulator
+
+We don't use it for managing charging, and it interferes with the
+extcon-based charging mode switching.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+Changes in v3:
+- Added this commit
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 3bfd35932..3b1a6f806 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -148,13 +148,6 @@ esafeout1_reg: ESAFEOUT1 {
+ 				esafeout2_reg: ESAFEOUT2 {
+ 					regulator-name = "ESAFEOUT2";
+ 				};
+-
+-				charger_reg: CHARGER {
+-					regulator-name = "CHARGER";
+-					regulator-min-microamp = <60000>;
+-					regulator-max-microamp = <2580000>;
+-					regulator-boot-on;
+-				};
+ 			};
+ 
+ 			muic {
+-- 
+2.53.0
+

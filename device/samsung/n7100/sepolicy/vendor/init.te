@@ -1,0 +1,4 @@
+# /efs is mounted on a directory the platform labels efs_file
+allow init efs_file:dir mounton;
+# eMMC queue tuning (discard_max_bytes)
+allow init sysfs_devices_block:file w_file_perms;

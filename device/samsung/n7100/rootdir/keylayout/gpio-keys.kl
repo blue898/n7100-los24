@@ -1,0 +1,6 @@
+# Galaxy Note II side keys + Home (exynos4412-midas gpio-keys). Mainline reports the Home key as
+# KEY_OK, which Generic.kl doesn't map at all.
+key 114   VOLUME_DOWN
+key 115   VOLUME_UP
+key 116   POWER
+key 352   HOME

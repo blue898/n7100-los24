@@ -1,0 +1,4 @@
+# Galaxy Note II capacitive keys left/right of Home. Modern apps have no options menu, so the
+# Menu key opens recents instead.
+key 139   APP_SWITCH
+key 158   BACK

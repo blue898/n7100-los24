@@ -1,0 +1,33 @@
+From 034b90d06728d50d63fa91cece85be8961505cb4 Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Mon, 26 May 2025 12:57:33 +0100
+Subject: [PATCH 65/89] dt-bindings: arm: samsung: Add Samsung Kona family
+ boards
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ .../devicetree/bindings/arm/samsung/samsung-boards.yaml   | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml b/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
+index 273464400..787d2cc98 100644
+--- a/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
++++ b/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
+@@ -106,6 +106,14 @@ properties:
+           - const: samsung,exynos4412
+           - const: samsung,exynos4
+ 
++      - description: Samsung Kona family boards
++        items:
++          - enum:
++              - samsung,n5110                   # Samsung GT-N5110 (Note 8.0 wifi-only version)
++          - const: samsung,kona
++          - const: samsung,exynos4412
++          - const: samsung,exynos4
++
+       - description: Samsung p4note family boards
+         items:
+           - enum:
+-- 
+2.53.0
+

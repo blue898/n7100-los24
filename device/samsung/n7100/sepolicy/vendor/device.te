@@ -1,0 +1,6 @@
+# /dev/ssp_sensorhub: samples from the SSP sensor hub MCU
+type ssp_device, dev_type;
+# RADIO partition: the modem firmware cbd loads
+type modem_block_device, dev_type;
+# EFS partition (IMEI, modem NV data), checked by fsck before init mounts it
+type efs_block_device, dev_type;

@@ -1,0 +1,12 @@
+# The radio HAL (ril/) hosting Samsung's libsec-ril: /dev/umts_*, /efs and its state files,
+# and the shell commands it runs (system() -> /vendor/bin/sh -> toybox)
+allow rild ril_vendor_data_file:dir create_dir_perms;
+allow rild ril_vendor_data_file:file create_file_perms;
+allow rild vendor_toolbox_exec:file rx_file_perms;
+allow rild proc_cmdline:file r_file_perms;
+# it still sets the old net.rmnet0.dns* properties, which nothing reads any more
+dontaudit rild net_radio_prop:property_service set;
+# Samsung's RIL peeks at the phone app's preferences and the telephony provider's
+# databases and reads properties of all sorts: not for a vendor process
+dontaudit rild system_data_file:dir r_dir_perms;
+dontaudit rild { default_prop system_prop }:file r_file_perms;

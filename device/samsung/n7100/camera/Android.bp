@@ -1,0 +1,67 @@
+// Galaxy Note II cameras: AOSP's external (UVC) camera HAL, adapted to the exynos4-is media
+// pipeline (N7100Camera.cpp) and served as built-in cameras (CameraProvider.cpp)
+cc_binary {
+    name: "android.hardware.camera.provider-service.n7100",
+    defaults: [
+        "android.hardware.graphics.common-ndk_shared",
+        "hidl_defaults",
+    ],
+    relative_install_path: "hw",
+    init_rc: ["camera-n7100.rc"],
+    vintf_fragments: ["camera-n7100.xml"],
+    vendor: true,
+    compile_multilib: "first",
+    local_include_dirs: ["."],
+    srcs: [
+        "CameraProvider.cpp",
+        "ExternalCameraDevice.cpp",
+        "ExternalCameraDeviceSession.cpp",
+        "ExternalCameraOfflineSession.cpp",
+        "ExternalCameraUtils.cpp",
+        "N7100Camera.cpp",
+        "convert.cpp",
+    ],
+    shared_libs: [
+        "android.hardware.camera.common-V1-ndk",
+        "android.hardware.camera.device-V1-ndk",
+        "android.hardware.camera.provider-V1-ndk",
+        "android.hardware.graphics.allocator-V2-ndk",
+        "android.hardware.graphics.mapper@2.0",
+        "android.hardware.graphics.mapper@3.0",
+        "android.hardware.graphics.mapper@4.0",
+        "android.hidl.allocator@1.0",
+        "android.hidl.memory@1.0",
+        "libbase",
+        "libbinder_ndk",
+        "libcamera_metadata",
+        "libcutils",
+        "libexif",
+        "libfmq",
+        "libgralloctypes",
+        "libhardware",
+        "libhidlbase",
+        "libhidlmemory",
+        "libjpeg",
+        "liblog",
+        "libsync",
+        "libtinyxml2",
+        "libutils",
+        "libui",
+        "libyuv",
+    ],
+    static_libs: [
+        "android.hardware.camera.common@1.0-helper",
+        "libaidlcommonsupport",
+    ],
+    header_libs: [
+        "media_plugin_headers",
+    ],
+    required: ["n7100_camera_config.xml"],
+}
+
+prebuilt_etc {
+    name: "n7100_camera_config.xml",
+    src: "n7100_camera_config.xml",
+    sub_dir: "camera",
+    vendor: true,
+}

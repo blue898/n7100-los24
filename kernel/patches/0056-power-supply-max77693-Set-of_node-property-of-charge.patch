@@ -1,0 +1,32 @@
+From c8cc50e7dc5d62086e5396c176840c2b768228df Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Thu, 15 Aug 2024 22:42:44 +0200
+Subject: [PATCH 56/89] power: supply: max77693: Set of_node property of
+ charger config
+
+This is necessary for the power supply subsystem to locate the charger
+by its device tree node, which we need to set it as a supplying PSU
+to the battery.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+[ grimler: change from of_node to fwnode to make it work with 6.17+ ]
+Signed-off-by: Henrik Grimler <henrik@grimler.se>
+---
+ drivers/power/supply/max77693_charger.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/power/supply/max77693_charger.c b/drivers/power/supply/max77693_charger.c
+index 6f0fdc9ad..6049f3f0c 100644
+--- a/drivers/power/supply/max77693_charger.c
++++ b/drivers/power/supply/max77693_charger.c
+@@ -947,6 +947,7 @@ static int max77693_charger_probe(struct platform_device *pdev)
+ 	chg->max77693 = max77693;
+ 
+ 	psy_cfg.drv_data = chg;
++	psy_cfg.fwnode = dev_fwnode(&pdev->dev);
+ 
+ 	chg->charger = devm_power_supply_register(&pdev->dev,
+ 						  &max77693_charger_desc,
+-- 
+2.53.0
+

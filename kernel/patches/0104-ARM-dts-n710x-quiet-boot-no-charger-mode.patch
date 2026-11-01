@@ -1,0 +1,38 @@
+From 06d71e2865a25d336406fada057502ce3313c292 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 21:49:19 +0100
+Subject: [PATCH 104/104] ARM: dts: n710x: quiet boot, no charger mode
+
+Put the kernel console on the debug UART instead of the display, and pass
+androidboot.mode=normal ahead of sboot's androidboot.mode=charger: when a
+cable powers the phone up, Android's charger UI can't draw (no fbdev,
+two DRM cards) and the screen would just show the console. Boot Android
+instead.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 1a2f9fa09..332ebc11f 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -281,10 +281,12 @@ &touchkey_reg {
+  * Boot parameters for Android. sboot's ATAG command line already carries
+  * androidboot.selinux=enforcing and Android init takes the first occurrence, so
+  * these go first and the decompressor appends sboot's line after them
+- * (CONFIG_ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND).
++ * (CONFIG_ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND). androidboot.mode=normal: when a cable
++ * powers the phone up, sboot asks for the charger mode, whose UI we don't have; boot
++ * Android instead. The console goes to the debug UART (JIG), not the display.
+  */
+ &{/chosen} {
+-	bootargs = "console=tty0 panic=10 s3c2410_wdt.tmr_atboot=1 printk.devkmsg=on sysctl.net.core.bpf_jit_enable=1 androidboot.init_fatal_reboot_target=recovery androidboot.hardware=n7100 androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
++	bootargs = "console=ttySAC2,115200 androidboot.mode=normal panic=10 s3c2410_wdt.tmr_atboot=1 printk.devkmsg=on sysctl.net.core.bpf_jit_enable=1 androidboot.init_fatal_reboot_target=recovery androidboot.hardware=n7100 androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
+ };
+ 
+ /*
+-- 
+2.53.0
+

@@ -1,0 +1,58 @@
+From 96bfe08c0fd7fd1a2dabd85350cb18afcefdf014 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 18:31:45 +0100
+Subject: [PATCH 99/99] ARM: dts: n710x: GPS on UART1, GPS_nRST released,
+ GPS_PWR_EN as a GPIO LED
+
+The Note II's Broadcom BCM4752 GPS sits on UART1 with flow control.
+Samsung's gpsd switches it on and off by writing 1/0 to a sysfs file
+(gpioNStdbyPath in gps.xml); a GPIO LED provides one for GPS_PWR_EN
+(gpl2-2). GPS_nRST (gpl2-1) stays high, as Samsung's midas-gps.c did.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/samsung/exynos4412-n710x.dtsi    | 31 +++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index de0908edb..1095a0218 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -396,3 +396,34 @@ opp-533000000 {
+ 		opp-microvolt = <1075000>;
+ 	};
+ };
++
++/*
++ * Broadcom BCM4752 GPS on UART1 (with flow control). Samsung's gpsd switches it
++ * on and off by writing 1/0 to a sysfs file (gps.xml gpioNStdbyPath); a GPIO LED
++ * gives it one for GPS_PWR_EN. GPS_nRST stays released, as on stock.
++ */
++&serial_1 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart1_data &uart1_fctl>;
++};
++
++&gpl2 {
++	gps-nrst-hog {
++		gpio-hog;
++		gpios = <1 GPIO_ACTIVE_HIGH>;
++		output-high;
++		line-name = "GPS_nRST";
++	};
++};
++
++/ {
++	gps-leds {
++		compatible = "gpio-leds";
++
++		gps-pwr-en {
++			label = "gps-pwr-en";
++			gpios = <&gpl2 2 GPIO_ACTIVE_HIGH>;
++			default-state = "off";
++		};
++	};
++};
+-- 
+2.53.0
+

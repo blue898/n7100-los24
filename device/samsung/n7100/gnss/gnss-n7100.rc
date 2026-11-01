@@ -1,0 +1,21 @@
+service vendor.gnss-n7100 /vendor/bin/hw/android.hardware.gnss-service.n7100
+    class hal
+    user gps
+    group system gps inet wakelock
+
+# Broadcom's daemon for the BCM4752 on UART1; the legacy HAL talks to it through pipes
+# in /data/vendor/gps (hardcoded in both blobs, see proprietary/README)
+service vendor.gpsd /vendor/bin/gpsd -c /vendor/etc/gps.xml
+    class main
+    user gps
+    group gps system inet net_raw wakelock
+
+on post-fs-data
+    mkdir /data/vendor/gps 0770 gps system
+    mkdir /data/vendor/gps/log 0770 gps system
+
+on boot
+    chown gps system /dev/ttySAC1
+    chmod 0660 /dev/ttySAC1
+    chown gps system /sys/class/leds/gps-pwr-en/brightness
+    chmod 0664 /sys/class/leds/gps-pwr-en/brightness

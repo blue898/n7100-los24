@@ -1,0 +1,40 @@
+From ec78f60c9823601ffa3b3ae64fcda0e2e3a434c9 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 22:13:42 +0100
+Subject: [PATCH 91/92] power: supply: max77693: use 460 mA input limit on USB
+ ports
+
+On the Galaxy Note II (GT-N7100) connected to a PC, the 500 mA input limit
+used for SDP/CDP/slow chargers puts CHGIN into UVLO immediately
+(CHG_DTLS_00.CHGIN_DTLS = 0, CHG_INT_OK.CHGIN_OK = 0) and it stays there,
+so the battery never charges and the power supply reports offline.
+Stepping CHG_CNFG_09 shows 460 mA is the highest limit that keeps CHGIN
+valid; Samsung's vendor kernel uses 360 mA.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/max77693_charger.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/max77693_charger.c b/drivers/power/supply/max77693_charger.c
+index 6049f3f0c..cef23f615 100644
+--- a/drivers/power/supply/max77693_charger.c
++++ b/drivers/power/supply/max77693_charger.c
+@@ -731,7 +731,13 @@ static void max77693_charger_extcon_work(struct work_struct *work)
+ 	case EXTCON_CHG_USB_SDP:
+ 	case EXTCON_CHG_USB_CDP:
+ 	case EXTCON_CHG_USB_SLOW:
+-		input_current = 500000; /* 500 mA */
++		/*
++		 * Not quite the 500 mA USB allows: on the Galaxy Note II (with a
++		 * PC port) an input limit of 480 mA or more makes CHGIN drop into
++		 * UVLO right away and stay there, so nothing charges. Samsung's
++		 * kernel uses 360 mA; 460 mA is the highest that keeps CHGIN valid.
++		 */
++		input_current = 460000;
+ 		set_charging = true;
+ 		set_otg = false;
+ 
+-- 
+2.53.0
+

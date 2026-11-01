@@ -1,0 +1,33 @@
+# Load kernel modules from /vendor/lib/modules by modalias (brcmfmac, sound, bluetooth, ...)
+modalias_handling enabled
+firmware_directories /vendor/firmware/
+
+# GPU (lima render node) and display (exynos-drm)
+/dev/dri/*                 0666   system     graphics
+
+# dma-buf heaps for gralloc/codec2
+/dev/dma_heap/system       0444   system     system
+/dev/dma_heap/reserved     0444   system     system
+/dev/dma_heap/default_cma_region 0444 system system
+
+# Sensor hub (sensors HAL)
+/dev/ssp_sensorhub         0660   system     system
+
+# Backlight / LEDs
+/sys/class/backlight/panel brightness 0664 system system
+/sys/class/backlight/panel bl_power   0664 system system
+/sys/class/leds/*          brightness 0664 system system
+
+# Cameras (exynos4-is): the camera HAL configures the subdevices of the media pipeline itself
+/dev/video*                0660   system     camera
+/dev/v4l-subdev*           0660   system     camera
+/dev/media*                0660   system     camera
+
+# XMM6262 modem (modem_if): cbd boots it, the radio HAL (libsec-ril) talks IPC
+/dev/umts_*                0660   radio      radio
+# RADIO: the modem firmware cbd loads after dropping to radio
+/dev/block/mmcblk0p10      0640   root       radio
+/dev/link_pm               0660   radio      radio
+/dev/multipdp              0660   radio      radio
+/sys/devices/platform/s5p-ehci ehci_power 0660 radio radio
+/sys/devices/platform/s5p-ohci ohci_power 0660 radio radio

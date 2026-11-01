@@ -1,0 +1,125 @@
+From 169b46ca5d63bd29ad2460e63f1dafa5e2fdc11e Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Thu, 21 Aug 2025 13:31:45 +0100
+Subject: [PATCH 68/89] ARM: dts: exynos: n710x-{ea8061|s6evr02} split into
+ n7100 and n7105
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ arch/arm/boot/dts/samsung/Makefile                       | 6 ++++--
+ arch/arm/boot/dts/samsung/exynos4412-n7100-ea8061.dts    | 9 +++++++++
+ arch/arm/boot/dts/samsung/exynos4412-n7100-s6evr02.dts   | 9 +++++++++
+ arch/arm/boot/dts/samsung/exynos4412-n7105-ea8061.dts    | 9 +++++++++
+ arch/arm/boot/dts/samsung/exynos4412-n7105-s6evr02.dts   | 9 +++++++++
+ ...412-n710x-ea8061.dts => exynos4412-n710x-ea8061.dtsi} | 0
+ ...2-n710x-s6evr02.dts => exynos4412-n710x-s6evr02.dtsi} | 0
+ arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi          | 2 --
+ 8 files changed, 40 insertions(+), 4 deletions(-)
+ create mode 100644 arch/arm/boot/dts/samsung/exynos4412-n7100-ea8061.dts
+ create mode 100644 arch/arm/boot/dts/samsung/exynos4412-n7100-s6evr02.dts
+ create mode 100644 arch/arm/boot/dts/samsung/exynos4412-n7105-ea8061.dts
+ create mode 100644 arch/arm/boot/dts/samsung/exynos4412-n7105-s6evr02.dts
+ rename arch/arm/boot/dts/samsung/{exynos4412-n710x-ea8061.dts => exynos4412-n710x-ea8061.dtsi} (100%)
+ rename arch/arm/boot/dts/samsung/{exynos4412-n710x-s6evr02.dts => exynos4412-n710x-s6evr02.dtsi} (100%)
+
+diff --git a/arch/arm/boot/dts/samsung/Makefile b/arch/arm/boot/dts/samsung/Makefile
+index 34ce633ef..f6b455b28 100644
+--- a/arch/arm/boot/dts/samsung/Makefile
++++ b/arch/arm/boot/dts/samsung/Makefile
+@@ -17,8 +17,10 @@ dtb-$(CONFIG_ARCH_EXYNOS4) += \
+ 	exynos4412-i9305.dtb \
+ 	exynos4412-itop-elite.dtb \
+ 	exynos4412-n5110.dtb \
+-	exynos4412-n710x-ea8061.dtb \
+-	exynos4412-n710x-s6evr02.dtb \
++	exynos4412-n7100-ea8061.dtb \
++	exynos4412-n7100-s6evr02.dtb \
++	exynos4412-n7105-ea8061.dtb \
++	exynos4412-n7105-s6evr02.dtb \
+ 	exynos4412-odroidu3.dtb \
+ 	exynos4412-odroidx.dtb \
+ 	exynos4412-odroidx2.dtb \
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n7100-ea8061.dts b/arch/arm/boot/dts/samsung/exynos4412-n7100-ea8061.dts
+new file mode 100644
+index 000000000..a08e7ec5f
+--- /dev/null
++++ b/arch/arm/boot/dts/samsung/exynos4412-n7100-ea8061.dts
+@@ -0,0 +1,9 @@
++// SPDX-License-Identifier: GPL-2.0
++/dts-v1/;
++#include "exynos4412-n710x-ea8061.dtsi"
++
++/ {
++	compatible = "samsung,n7100", "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
++	model = "Samsung Galaxy Note 2 (GT-N7100) based on Exynos4412";
++	chassis-type = "handset";
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n7100-s6evr02.dts b/arch/arm/boot/dts/samsung/exynos4412-n7100-s6evr02.dts
+new file mode 100644
+index 000000000..c81d78ce9
+--- /dev/null
++++ b/arch/arm/boot/dts/samsung/exynos4412-n7100-s6evr02.dts
+@@ -0,0 +1,9 @@
++// SPDX-License-Identifier: GPL-2.0
++/dts-v1/;
++#include "exynos4412-n710x-s6evr02.dtsi"
++
++/ {
++	compatible = "samsung,n7100", "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
++	model = "Samsung Galaxy Note 2 (GT-N7100) based on Exynos4412";
++	chassis-type = "handset";
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n7105-ea8061.dts b/arch/arm/boot/dts/samsung/exynos4412-n7105-ea8061.dts
+new file mode 100644
+index 000000000..5cf99414e
+--- /dev/null
++++ b/arch/arm/boot/dts/samsung/exynos4412-n7105-ea8061.dts
+@@ -0,0 +1,9 @@
++// SPDX-License-Identifier: GPL-2.0
++/dts-v1/;
++#include "exynos4412-n710x-ea8061.dtsi"
++
++/ {
++	compatible = "samsung,n7105", "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
++	model = "Samsung Galaxy Note 2 LTE (GT-N7105) based on Exynos4412";
++	chassis-type = "handset";
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n7105-s6evr02.dts b/arch/arm/boot/dts/samsung/exynos4412-n7105-s6evr02.dts
+new file mode 100644
+index 000000000..af19aa879
+--- /dev/null
++++ b/arch/arm/boot/dts/samsung/exynos4412-n7105-s6evr02.dts
+@@ -0,0 +1,9 @@
++// SPDX-License-Identifier: GPL-2.0
++/dts-v1/;
++#include "exynos4412-n710x-s6evr02.dtsi"
++
++/ {
++	compatible = "samsung,n7105", "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
++	model = "Samsung Galaxy Note 2 LTE (GT-N7105) based on Exynos4412";
++	chassis-type = "handset";
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x-ea8061.dts b/arch/arm/boot/dts/samsung/exynos4412-n710x-ea8061.dtsi
+similarity index 100%
+rename from arch/arm/boot/dts/samsung/exynos4412-n710x-ea8061.dts
+rename to arch/arm/boot/dts/samsung/exynos4412-n710x-ea8061.dtsi
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x-s6evr02.dts b/arch/arm/boot/dts/samsung/exynos4412-n710x-s6evr02.dtsi
+similarity index 100%
+rename from arch/arm/boot/dts/samsung/exynos4412-n710x-s6evr02.dts
+rename to arch/arm/boot/dts/samsung/exynos4412-n710x-s6evr02.dtsi
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index cf27f1a7c..adc9cc0f9 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -4,8 +4,6 @@
+ 
+ / {
+ 	compatible = "samsung,n710x", "samsung,midas", "samsung,exynos4412", "samsung,exynos4";
+-	model = "Samsung Galaxy Note 2 (GT-N7100, GT-N7105) based on Exynos4412";
+-	chassis-type = "handset";
+ 
+ 	memory@40000000 {
+ 		device_type = "memory";
+-- 
+2.53.0
+

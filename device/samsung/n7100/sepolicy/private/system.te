@@ -1,0 +1,5 @@
+# platform domains that need a little more on this hardware (private types, so system_ext)
+# storaged: eMMC statistics and revision
+r_dir_file(storaged, sysfs_devices_block)
+# MediaCodecList generation reads the media configuration properties
+get_prop(mediacodeclist_generator, media_config_prop)

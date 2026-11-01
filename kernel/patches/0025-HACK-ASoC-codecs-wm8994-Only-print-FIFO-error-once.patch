@@ -1,0 +1,29 @@
+From 3fbd4d2691b9896bfe5600ca05e5e7b2d04bdd8d Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Fri, 19 Jul 2024 08:15:42 +0200
+Subject: [PATCH 25/89] (HACK) ASoC: codecs: wm8994: Only print FIFO error once
+
+Workaround for FIFO errors spamming kernel logs, the cause has yet to
+be investigated.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ sound/soc/codecs/wm8994.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sound/soc/codecs/wm8994.c b/sound/soc/codecs/wm8994.c
+index 8bf58a6a8..1cbc11a7f 100644
+--- a/sound/soc/codecs/wm8994.c
++++ b/sound/soc/codecs/wm8994.c
+@@ -4111,7 +4111,7 @@ static irqreturn_t wm8994_fifo_error(int irq, void *data)
+ {
+ 	struct snd_soc_component *component = data;
+ 
+-	dev_err(component->dev, "FIFO error\n");
++	dev_err_once(component->dev, "FIFO error\n");
+ 
+ 	return IRQ_HANDLED;
+ }
+-- 
+2.53.0
+

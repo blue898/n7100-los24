@@ -1,0 +1,60 @@
+From b3f6fac3660d67d707087f3e5c61b7f66c249051 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Mon, 15 Jul 2024 15:20:47 +0200
+Subject: [PATCH 24/89] ARM: dts: samsung: exynos4212-tab3: Drop dummy mic bias
+ regulators
+
+Add the samsung,tab3-audio compatible that makes mic bias regulators
+non-required, and drop the dummy main/sub mic bias regulators that
+don't exist in hardware.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+Changes in v2:
+- Rename earmic bias reg node to voltage-regulator-4
+---
+ .../arm/boot/dts/samsung/exynos4212-tab3.dtsi | 20 ++-----------------
+ 1 file changed, 2 insertions(+), 18 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 12b7f252b..9a50e9bfb 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -286,21 +286,7 @@ display_3v3_supply: voltage-regulator-3 {
+ 		enable-active-high;
+ 	};
+ 
+-	mic_bias_reg: voltage-regulator-4 {
+-		compatible = "regulator-fixed";
+-		regulator-name = "MICBIAS_LDO_2.8V";
+-		regulator-min-microvolt = <2800000>;
+-		regulator-max-microvolt = <2800000>;
+-	};
+-
+-	submic_bias_reg: voltage-regulator-5 {
+-		compatible = "regulator-fixed";
+-		regulator-name = "SUB_MICBIAS_LDO_2.8V";
+-		regulator-min-microvolt = <2800000>;
+-		regulator-max-microvolt = <2800000>;
+-	};
+-
+-	earmic_bias_reg: voltage-regulator-6 {
++	earmic_bias_reg: voltage-regulator-4 {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "EAR_MICBIAS_LDO_2.8V";
+ 		regulator-min-microvolt = <2800000>;
+@@ -310,10 +296,8 @@ earmic_bias_reg: voltage-regulator-6 {
+ 	};
+ 
+ 	sound: sound {
+-		compatible = "samsung,midas-audio";
++		compatible = "samsung,tab3-audio", "samsung,midas-audio";
+ 		model = "TAB3";
+-		mic-bias-supply = <&mic_bias_reg>;
+-		submic-bias-supply = <&submic_bias_reg>;
+ 
+ 		lineout-sel-gpios = <&gpj1 2 GPIO_ACTIVE_HIGH>;
+ 
+-- 
+2.53.0
+

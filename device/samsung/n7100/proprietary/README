@@ -1,0 +1,30 @@
+Samsung blobs for the GT-N7100 (not redistributable, not in the repository: tools/extract-blobs.sh produces them)
+
+Modem (XMM6262 over HSIC, kernel modem_if):
+  bin/cbd                     LineageOS 21 vendor (= stock): boots the modem from RADIO (-p 10)
+  lib/libsec-ril.so           LineageOS 21 vendor (= stock N7100XXUFND3 RIL)
+  lib/libsecnativefeature.so  LineageOS 21 vendor
+  lib/libstlport.so           LineageOS 21 vendor
+  lib/libsqlite.so            LineageOS 21 vendor
+  lib/libexpat.so             LineageOS 21 vendor
+GPS (Broadcom BCM4752 on UART1):
+  bin/gpsd                    stock N7100XXUFNE1 /system/bin/gpsd
+  lib/hw/gps.default.so       stock N7100XXUFNE1 (LineageOS 21's needs a missing library)
+  etc/gps.xml                 stock, see below
+  etc/gps.cer                 stock /system/bin/gps.cer
+
+Fixups (patchelf 0.18 and fix-textrel.py), because the blobs predate today's vendor libraries:
+  libsec-ril.so        libril.so -> libril-n7100.so (our RIL host, ril/libril)
+                       libcutils-v29.so -> libsecril-compat.so (ril/compat: strdup8to16 etc.;
+                       LineageOS' Android 10 libcutils copy no longer loads against libbase)
+  libsec-ril.so, libstlport.so, libsecnativefeature.so, gps.default.so, gpsd
+                       libstdc++.so -> libstdc++_vendor.so (bionic's, for vendor code)
+  gpsd                 libgui.so -> libgps-compat.so (gnss/compat: KitKat SensorManager with an
+                       event queue that never fires, a libwrappergps RIL client that connects
+                       but never answers, SSLv3_client_method); libicuuc.so and
+                       libwrappergps.so removed (no symbols used / provided by libgps-compat)
+  gpsd, gps.default.so fix-textrel.py: KitKat's crtbegin_dynamic (_start) and crtbegin_so
+                       (__on_dlclose) keep absolute addresses in .text; rewritten
+                       pc-relative, so the linker no longer sees text relocations
+  gps.xml              gpioNStdbyPath -> /sys/class/leds/gps-pwr-en/brightness (a GPIO LED in
+                       the kernel DT), log directory -> /data/gps/, TLS certificate -> /vendor/etc

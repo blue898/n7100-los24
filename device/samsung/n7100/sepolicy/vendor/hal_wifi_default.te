@@ -1,0 +1,5 @@
+# the driver (brcmfmac) is loaded at boot already; the HAL's attempt to load it is harmless
+dontaudit hal_wifi_default self:capability sys_module;
+# interface state over rtnetlink, and the firmware version it publishes
+allow hal_wifi_default self:netlink_route_socket { create_socket_perms_no_ioctl nlmsg_read };
+set_prop(hal_wifi_default, vendor_wifi_version_prop)

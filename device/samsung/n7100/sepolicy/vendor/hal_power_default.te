@@ -1,0 +1,6 @@
+# power-n7100's booster: CPU frequency floor/cap, GPU and memory bus devfreq floors
+allow hal_power_default sysfs_devices_system_cpu:dir r_dir_perms;
+allow hal_power_default sysfs_devices_system_cpu:file rw_file_perms;
+allow hal_power_default sysfs_devfreq_n7100:dir r_dir_perms;
+allow hal_power_default sysfs_devfreq_n7100:file rw_file_perms;
+allow hal_power_default sysfs_gpu:dir search;

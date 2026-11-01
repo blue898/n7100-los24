@@ -1,0 +1,86 @@
+From ea77b3ecf7d0158d00b2e58def29de42a9e48ff8 Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Sat, 27 Sep 2025 01:29:28 +0200
+Subject: [PATCH 75/89] ARM: dts: samsung: p4note: add n8000 and n8020 device
+ tree files
+
+The p4note family has multiple variants that require different user
+space configuration files to be loaded. To differentiate between
+variants, the compatible string is required to match, e.g. for
+networking. Add the corresponding device tree files to make that
+possible.
+
+Signed-off-by: Martin Juecker <martin.juecker@gmail.com>
+---
+ arch/arm/boot/dts/samsung/Makefile             |  2 ++
+ .../dts/samsung/exynos4412-p4note-n8000.dts    | 18 ++++++++++++++++++
+ .../dts/samsung/exynos4412-p4note-n8020.dts    | 18 ++++++++++++++++++
+ 3 files changed, 38 insertions(+)
+ create mode 100644 arch/arm/boot/dts/samsung/exynos4412-p4note-n8000.dts
+ create mode 100644 arch/arm/boot/dts/samsung/exynos4412-p4note-n8020.dts
+
+diff --git a/arch/arm/boot/dts/samsung/Makefile b/arch/arm/boot/dts/samsung/Makefile
+index f6b455b28..ec526f0f9 100644
+--- a/arch/arm/boot/dts/samsung/Makefile
++++ b/arch/arm/boot/dts/samsung/Makefile
+@@ -25,7 +25,9 @@ dtb-$(CONFIG_ARCH_EXYNOS4) += \
+ 	exynos4412-odroidx.dtb \
+ 	exynos4412-odroidx2.dtb \
+ 	exynos4412-origen.dtb \
++	exynos4412-p4note-n8000.dtb \
+ 	exynos4412-p4note-n8010.dtb \
++	exynos4412-p4note-n8020.dtb \
+ 	exynos4412-smdk4412.dtb \
+ 	exynos4412-tiny4412.dtb \
+ 	exynos4412-trats2.dtb
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-p4note-n8000.dts b/arch/arm/boot/dts/samsung/exynos4412-p4note-n8000.dts
+new file mode 100644
+index 000000000..0c2928cba
+--- /dev/null
++++ b/arch/arm/boot/dts/samsung/exynos4412-p4note-n8000.dts
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Samsung's Galaxy Note 10.1 - N8000 (3g version)
++ *
++ * Copyright (c) 2013 Samsung Electronics Co., Ltd.
++ *		http://www.samsung.com
++ */
++
++/dts-v1/;
++#include "exynos4412-p4note.dtsi"
++
++/ {
++	model = "Samsung Galaxy Note 10.1 (GT-N8000) based on Exynos4412";
++	compatible = "samsung,n8000", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
++	chassis-type = "tablet";
++
++	/* this is the 3g variant */
++};
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-p4note-n8020.dts b/arch/arm/boot/dts/samsung/exynos4412-p4note-n8020.dts
+new file mode 100644
+index 000000000..e9a5e9161
+--- /dev/null
++++ b/arch/arm/boot/dts/samsung/exynos4412-p4note-n8020.dts
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Samsung's Galaxy Note 10.1 - N8020 (lte version)
++ *
++ * Copyright (c) 2013 Samsung Electronics Co., Ltd.
++ *		http://www.samsung.com
++ */
++
++/dts-v1/;
++#include "exynos4412-p4note.dtsi"
++
++/ {
++	model = "Samsung Galaxy Note 10.1 (GT-N8020) based on Exynos4412";
++	compatible = "samsung,n8020", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
++	chassis-type = "tablet";
++
++	/* this is the lte variant */
++};
+-- 
+2.53.0
+

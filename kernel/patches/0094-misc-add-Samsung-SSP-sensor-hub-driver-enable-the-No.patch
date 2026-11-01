@@ -1,0 +1,1003 @@
+From 04e7f73231b37ae43fbcbe728c7602cab9ba92ed Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sun, 1 Nov 2026 03:14:54 +0100
+Subject: [PATCH] misc: add Samsung SSP sensor hub driver, enable the Note II
+ sensors
+
+The Galaxy Note II's motion and environment sensors (LSM330
+accelerometer/gyroscope, AK8963C magnetometer, BMP182 barometer, CM36651
+light/proximity) sit behind an AT32UC3L MCU on I2C1 (0x18) that Samsung
+calls SSP. Add a driver for its protocol (taken from Samsung's GPL
+drivers/sensorhub): wake handshake on AP_MCU_INT/MCU_AP_INT2, commands
+with ACK, data frames fetched on the falling edge of MCU_AP_INT.
+
+Samples go to userspace through /dev/ssp_sensorhub (fixed-size records
+with CLOCK_BOOTTIME timestamps, "<sensor> <delay_ms>" writes to start
+and stop sensors) for the Android sensors HAL; sysfs has the latest
+samples, the magnetometer's fuse ROM values and the proximity
+threshold.
+
+Enable i2c_1 and describe the hub in the N710x device tree. The light/
+proximity sensor and the barometer are powered from LDO20, which
+Samsung's board code leaves alone and mainline turns off as unused;
+the MCU only looks for its sensors when it boots, so the driver
+enables the supply before releasing the MCU from reset. A 10 us reset
+pulse (as in Samsung's driver) left the MCU with only some of its
+sensors after boot; 10 ms works, and like Samsung's driver it asks for
+the sensor list no earlier than 3 s after the reset.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/samsung/exynos4412-n710x.dtsi    |  32 +
+ drivers/misc/Kconfig                          |  11 +
+ drivers/misc/Makefile                         |   1 +
+ drivers/misc/samsung-ssp.c                    | 886 ++++++++++++++++++
+ 4 files changed, 930 insertions(+)
+ create mode 100755 drivers/misc/samsung-ssp.c
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 306e66bbb..f9fe91072 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -298,3 +298,35 @@ digitizer@56 {
+ 		reset-gpios = <&gpy2 1 GPIO_ACTIVE_LOW>;
+ 	};
+ };
++
++&i2c_1 {
++	samsung,i2c-sda-delay = <100>;
++	samsung,i2c-slave-addr = <0x10>;
++	samsung,i2c-max-bus-freq = <100000>;
++	pinctrl-0 = <&i2c1_bus>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	/* "SSP" MCU in front of the accelerometer/gyroscope, magnetometer, barometer, light/prox */
++	sensorhub@18 {
++		compatible = "samsung,midas-ssp";
++		reg = <0x18>;
++		interrupt-parent = <&gpx0>;
++		interrupts = <0 IRQ_TYPE_EDGE_FALLING>;
++		pinctrl-0 = <&ssp_pins>;
++		pinctrl-names = "default";
++		mcu-ap-int-gpios = <&gpx0 0 GPIO_ACTIVE_HIGH>;
++		mcu-ap-int2-gpios = <&gpx2 1 GPIO_ACTIVE_HIGH>;
++		ap-mcu-int-gpios = <&gpx0 2 GPIO_ACTIVE_HIGH>;
++		reset-gpios = <&gpy2 2 GPIO_ACTIVE_LOW>;
++		/* light/proximity sensor and barometer */
++		vdd-supply = <&ldo20_reg>;
++	};
++};
++
++&pinctrl_1 {
++	ssp_pins: ssp-pins {
++		samsung,pins = "gpx0-0", "gpx0-2", "gpx2-1", "gpy2-2";
++		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
++	};
++};
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 7364931da..9f2530611 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -568,6 +568,17 @@ config MCHP_LAN966X_PCI
+ 	    - lan966x-miim (MDIO_MSCC_MIIM)
+ 	    - lan966x-switch (LAN966X_SWITCH)
+ 
++config SAMSUNG_SSP_SENSORHUB
++	tristate "Samsung SSP sensor hub (Galaxy Note II)"
++	depends on I2C && GPIOLIB && OF
++	help
++	  Driver for the sensor hub MCU of the Samsung Galaxy Note II (GT-N7100), which runs its
++	  accelerometer, gyroscope, magnetometer, barometer and light/proximity sensor. Samples
++	  are delivered through /dev/ssp_sensorhub.
++
++	  To compile this driver as a module, choose M here: the module will be called
++	  samsung-ssp.
++
+ source "drivers/misc/c2port/Kconfig"
+ source "drivers/misc/eeprom/Kconfig"
+ source "drivers/misc/cb710/Kconfig"
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index e8d8d5d88..adebaf765 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -71,3 +71,4 @@ obj-y				+= keba/
+ obj-y				+= amd-sbi/
+ obj-$(CONFIG_MISC_RP1)		+= rp1/
+ obj-$(CONFIG_INTEL_SSEI)	+= issei/
++obj-$(CONFIG_SAMSUNG_SSP_SENSORHUB)	+= samsung-ssp.o
+diff --git a/drivers/misc/samsung-ssp.c b/drivers/misc/samsung-ssp.c
+new file mode 100755
+index 000000000..16468e4e7
+--- /dev/null
++++ b/drivers/misc/samsung-ssp.c
+@@ -0,0 +1,886 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Samsung "SSP" sensor hub of the Galaxy Note II (GT-N7100)
++ *
++ * An Atmel AT32UC3L MCU runs the LSM330 accelerometer/gyroscope, the AK8963C magnetometer, the
++ * BMP182 barometer and the CM36651 light/proximity sensor and pushes their samples to the AP over
++ * I2C. The protocol is taken from Samsung's GPL driver (drivers/sensorhub/ssp_*.c in the smdk4412
++ * kernel):
++ *  - before each command the AP waits until the MCU isn't busy (MCU_AP_INT high), pulses
++ *    AP_MCU_INT low and waits for the MCU to acknowledge by pulling MCU_AP_INT2 low;
++ *  - commands are a write followed by a read of the answer (an ACK byte for most of them);
++ *  - the MCU signals new data with a falling edge on MCU_AP_INT; the AP then asks for the frame
++ *    length (SSD -> RTS, length) and reads the frame (SRM), a list of [type, sensor, payload]
++ *    records.
++ *
++ * Userspace interface (meant for the Android sensors HAL):
++ *  - /dev/ssp_sensorhub: read() returns struct ssp_event records (blocking, poll() works);
++ *    write() takes "<sensor> <delay_ms>" lines: a delay starts the sensor or changes its rate,
++ *    0 stops it. Sensors started through the file are stopped again when it's closed.
++ *  - sysfs: "enable" (same syntax, for testing), "data" (latest sample of each sensor), "info",
++ *    "mag_asa" (AK8963C sensitivity adjustment from its fuse ROM), "prox_threshold"
++ *    ("<high> <cancellation>").
++ */
++
++#include <linux/bits.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/interrupt.h>
++#include <linux/kfifo.h>
++#include <linux/miscdevice.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/poll.h>
++#include <linux/regulator/consumer.h>
++#include <linux/timekeeping.h>
++#include <linux/uaccess.h>
++#include <linux/unaligned.h>
++
++/* AP -> MCU */
++#define SSP_WHOAMI		0x0f
++#define SSP_FIRMWARE_REV	0xf0
++#define SSP_SENSOR_FORMATION	0xf1
++#define SSP_PROX_THRESHOLD	0xf2
++#define SSP_SENSOR_SCANNING	0xf4
++#define SSP_STT			0xc8	/* request a large message */
++#define SSP_SRM			0xca	/* start to read message */
++#define SSP_SSM			0xcb	/* start to send message */
++#define SSP_SSD			0xce	/* start to send data type and length */
++#define SSP_INST_ADD		0xa1
++#define SSP_INST_REMOVE		0xa2
++#define SSP_INST_CHANGE_DELAY	0xa4
++#define SSP_FUSEROM		0x01
++
++/* MCU -> AP */
++#define SSP_DEVICE_ID		0x55
++#define SSP_ACK			0x80
++#define SSP_RTS			0xc4	/* ready to send */
++#define SSP_MSG_BYPASS_DATA	0x00
++#define SSP_MSG_DEBUG_DATA	0x03
++
++#define SSP_BOOTLOADER_ADDR	0x26
++#define SSP_BL_APP_CRC_FAIL	0x40
++
++/* sensor mounting position on the N7100 board (CONFIG_SENSORS_SSP_*_POSITION) */
++#define SSP_POSITION		7
++#define SSP_PROX_HI_THRESHOLD	13
++
++enum ssp_sensor {
++	SSP_ACCEL,
++	SSP_GYRO,
++	SSP_MAG,
++	SSP_PRESSURE,
++	SSP_GESTURE,
++	SSP_PROX,
++	SSP_LIGHT,
++	SSP_PROX_RAW,
++	SSP_SENSOR_MAX,
++};
++
++static const char * const ssp_sensor_names[SSP_SENSOR_MAX] = {
++	"accel", "gyro", "mag", "pressure", "gesture", "prox", "light", "prox_raw",
++};
++
++static const u8 ssp_payload_len[SSP_SENSOR_MAX] = {
++	[SSP_ACCEL] = 6, [SSP_GYRO] = 6, [SSP_MAG] = 6, [SSP_PRESSURE] = 5,
++	[SSP_GESTURE] = 8, [SSP_PROX] = 2, [SSP_LIGHT] = 8, [SSP_PROX_RAW] = 1,
++};
++
++/*
++ * One sample, as read from /dev/ssp_sensorhub. data[] per sensor:
++ *  accel, gyro, mag, gesture: raw x, y, z (and w), accel 1024/g, gyro at 500 dps full scale
++ *  pressure: [0] pressure as computed by the MCU, [1] temperature
++ *  prox: [0] 1 = near, [1] raw value; light: red, green, blue, white; prox_raw: [0] raw value
++ */
++struct ssp_event {
++	__s64 timestamp;	/* CLOCK_BOOTTIME, ns */
++	__s32 data[4];
++	__u32 sensor;
++	__u32 reserved;
++};
++
++struct ssp_data {
++	struct i2c_client *client;
++	struct gpio_desc *reset;	/* AP_MCU_RESET */
++	struct gpio_desc *ap_mcu_int;	/* wake pulse to the MCU, idle high */
++	struct gpio_desc *mcu_ap_int;	/* data IRQ, low while the MCU is busy */
++	struct gpio_desc *mcu_ap_int2;	/* MCU ack, low once it's awake */
++
++	struct mutex cmd_lock;		/* commands and sensor state */
++	struct mutex xfer_lock;		/* multi-transfer exchanges with the MCU */
++	u32 available;
++	u32 enabled;
++	u32 enabled_by_file;
++	u8 delay_ms[SSP_SENSOR_MAX];
++	u8 delay_cmd[SSP_SENSOR_MAX];
++	u8 prox_hi, prox_canc;
++	u32 fw_rev;
++	u8 mag_asa[3];
++	unsigned int cmd_fails;
++	bool ready;			/* probed: failures may reset the MCU */
++	ktime_t reset_time;
++	struct work_struct reset_work;
++	struct delayed_work rescan_work;
++
++	s64 irq_time;
++	u8 frame[256];
++	struct ssp_event last[SSP_SENSOR_MAX];
++
++	struct miscdevice misc;
++	DECLARE_KFIFO(fifo, struct ssp_event, 512);
++	spinlock_t fifo_lock;
++	wait_queue_head_t wq;
++	atomic_t opened;
++	unsigned long dropped;
++};
++
++static int ssp_xfer(struct ssp_data *ssp, const u8 *tx, u16 txlen, u8 *rx, u16 rxlen,
++		    int tries)
++{
++	struct i2c_msg msgs[2] = {
++		{ .addr = ssp->client->addr, .len = txlen, .buf = (u8 *)tx },
++		{ .addr = ssp->client->addr, .flags = I2C_M_RD, .len = rxlen, .buf = rx },
++	};
++	int ret;
++
++	do {
++		ret = i2c_transfer(ssp->client->adapter, msgs, 2);
++		if (ret == 2)
++			return 0;
++		if (--tries > 0)
++			usleep_range(10000, 11000);
++	} while (tries > 0);
++
++	return ret < 0 ? ret : -EIO;
++}
++
++/* Get the MCU's attention before a command */
++static void ssp_wakeup_mcu(struct ssp_data *ssp)
++{
++	int i;
++
++	for (i = 0; i < 200 && !gpiod_get_value_cansleep(ssp->mcu_ap_int); i++)
++		usleep_range(5000, 5500);
++	if (i == 200)
++		dev_warn_ratelimited(&ssp->client->dev, "MCU stays busy\n");
++
++	gpiod_set_value_cansleep(ssp->ap_mcu_int, 0);
++	udelay(1);
++	gpiod_set_value_cansleep(ssp->ap_mcu_int, 1);
++
++	for (i = 0; i < 200 && gpiod_get_value_cansleep(ssp->mcu_ap_int2); i++)
++		usleep_range(5000, 5500);
++	if (i == 200)
++		dev_warn_ratelimited(&ssp->client->dev, "MCU wakeup timeout\n");
++}
++
++/* A command that returns rxlen bytes of data */
++static int ssp_read_cmd(struct ssp_data *ssp, const u8 *tx, u16 txlen, u8 *rx, u16 rxlen)
++{
++	int ret;
++
++	ssp_wakeup_mcu(ssp);
++	mutex_lock(&ssp->xfer_lock);
++	ret = ssp_xfer(ssp, tx, txlen, rx, rxlen, 3);
++	mutex_unlock(&ssp->xfer_lock);
++	return ret;
++}
++
++/* A command the MCU answers with ACK */
++static int ssp_ack_cmd(struct ssp_data *ssp, const u8 *tx, u16 txlen)
++{
++	u8 ack = 0;
++	int ret = -EIO, i;
++
++	for (i = 0; i < 4; i++) {
++		ret = ssp_read_cmd(ssp, tx, txlen, &ack, 1);
++		if (!ret && ack == SSP_ACK)
++			return 0;
++		if (!ret)
++			ret = -EIO;
++		usleep_range(10000, 11000);
++	}
++
++	dev_err(&ssp->client->dev, "command %02x %02x failed: %d (answer %02x)\n",
++		tx[0], txlen > 1 ? tx[1] : 0, ret, ack);
++	if (++ssp->cmd_fails >= 3 && ssp->ready)
++		schedule_work(&ssp->reset_work);
++	return ret;
++}
++
++static void ssp_push_event(struct ssp_data *ssp, const struct ssp_event *ev)
++{
++	ssp->last[ev->sensor] = *ev;
++	if (!atomic_read(&ssp->opened))
++		return;
++	if (!kfifo_in_spinlocked(&ssp->fifo, ev, 1, &ssp->fifo_lock))
++		ssp->dropped++;
++	wake_up_interruptible(&ssp->wq);
++}
++
++static void ssp_report(struct ssp_data *ssp, unsigned int type, const u8 *p, s64 ts)
++{
++	struct ssp_event ev = { .timestamp = ts, .sensor = type };
++	int i;
++
++	switch (type) {
++	case SSP_ACCEL:
++		for (i = 0; i < 3; i++) {
++			s32 v = (s16)get_unaligned_be16(p + 2 * i);
++
++			/* the MCU sends 12-bit two's complement values */
++			ev.data[i] = v > 2048 ? v - 4096 : v;
++		}
++		break;
++	case SSP_GYRO:
++	case SSP_MAG:
++		for (i = 0; i < 3; i++)
++			ev.data[i] = (s16)get_unaligned_be16(p + 2 * i);
++		break;
++	case SSP_GESTURE:
++		for (i = 0; i < 4; i++)
++			ev.data[i] = (s16)get_unaligned_be16(p + 2 * i);
++		break;
++	case SSP_PRESSURE:
++		ev.data[0] = get_unaligned_be24(p);
++		ev.data[1] = (s16)get_unaligned_be16(p + 3);
++		break;
++	case SSP_PROX:
++		ev.data[0] = p[0];
++		ev.data[1] = p[1];
++		break;
++	case SSP_LIGHT:
++		for (i = 0; i < 4; i++)
++			ev.data[i] = get_unaligned_be16(p + 2 * i);
++		break;
++	case SSP_PROX_RAW:
++		ev.data[0] = p[0];
++		break;
++	}
++
++	ssp_push_event(ssp, &ev);
++}
++
++static void ssp_parse_frame(struct ssp_data *ssp, const u8 *buf, int len, s64 ts)
++{
++	struct device *dev = &ssp->client->dev;
++	int i = 0;
++
++	while (i < len) {
++		switch (buf[i]) {
++		case SSP_MSG_BYPASS_DATA: {
++			unsigned int type, plen;
++
++			if (i + 2 > len)
++				return;
++			type = buf[i + 1];
++			plen = type < SSP_SENSOR_MAX ? ssp_payload_len[type] : 0;
++			if (!plen || i + 2 + plen > len) {
++				dev_warn_ratelimited(dev, "bad record %02x %02x at %d/%d\n",
++						     buf[i], buf[i + 1], i, len);
++				return;
++			}
++			ssp_report(ssp, type, buf + i + 2, ts);
++			i += 2 + plen;
++			break;
++		}
++		case SSP_MSG_DEBUG_DATA: {
++			unsigned int n;
++
++			if (i + 2 > len)
++				return;
++			n = buf[i + 1];
++			if (i + 2 + n > len)
++				return;
++			dev_info(dev, "MCU: %.*s\n", n ? n - 1 : 0, buf + i + 2);
++			i += 2 + n;
++			break;
++		}
++		default:
++			/* library or self-test data, which we never ask for */
++			dev_dbg(dev, "skipping %02x at %d/%d\n", buf[i], i, len);
++			i++;
++			break;
++		}
++	}
++}
++
++static irqreturn_t ssp_irq(int irq, void *dev_id)
++{
++	struct ssp_data *ssp = dev_id;
++
++	WRITE_ONCE(ssp->irq_time, ktime_get_boottime_ns());
++	return IRQ_WAKE_THREAD;
++}
++
++static irqreturn_t ssp_irq_thread(int irq, void *dev_id)
++{
++	struct ssp_data *ssp = dev_id;
++	s64 ts = READ_ONCE(ssp->irq_time);
++	u8 cmd = SSP_SSD, hdr[2] = { 0 };
++	int ret;
++
++	mutex_lock(&ssp->xfer_lock);
++	ret = ssp_xfer(ssp, &cmd, 1, hdr, 2, 1);
++	if (ret) {
++		dev_warn_ratelimited(&ssp->client->dev, "SSD failed: %d\n", ret);
++		goto out;
++	}
++	if (hdr[0] != SSP_RTS || !hdr[1]) {
++		if (hdr[0] || hdr[1])
++			dev_dbg(&ssp->client->dev, "SSD answer %02x %02x\n", hdr[0], hdr[1]);
++		goto out;
++	}
++	cmd = SSP_SRM;
++	ret = ssp_xfer(ssp, &cmd, 1, ssp->frame, hdr[1], 1);
++	if (ret) {
++		dev_warn_ratelimited(&ssp->client->dev, "SRM failed: %d\n", ret);
++		goto out;
++	}
++	ssp_parse_frame(ssp, ssp->frame, hdr[1], ts);
++out:
++	mutex_unlock(&ssp->xfer_lock);
++	return IRQ_HANDLED;
++}
++
++/* Rates the MCU knows: 10, 20, 66 and 200 ms */
++static u8 ssp_quantize_delay(unsigned int ms, u8 *cmd)
++{
++	static const u8 rates[] = { 10, 20, 66, 200 };
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(rates) - 1 && ms > rates[i]; i++)
++		;
++	*cmd = i;
++	return rates[i];
++}
++
++static int ssp_set_prox_threshold(struct ssp_data *ssp)
++{
++	u8 tx[3] = { SSP_PROX_THRESHOLD, ssp->prox_hi, ssp->prox_canc };
++
++	return ssp_ack_cmd(ssp, tx, sizeof(tx));
++}
++
++/* Start a sensor, change its rate or (ms == 0) stop it. Called with cmd_lock held. */
++static int ssp_set_sensor(struct ssp_data *ssp, unsigned int type, unsigned int ms)
++{
++	u8 tx[5] = { SSP_SSM, 0, type };
++	int ret;
++
++	if (type >= SSP_SENSOR_MAX || !(ssp->available & BIT(type)))
++		return -ENODEV;
++
++	if (!ms) {
++		if (!(ssp->enabled & BIT(type)))
++			return 0;
++		tx[1] = SSP_INST_REMOVE;
++		tx[3] = ssp->delay_cmd[type];
++		tx[4] = ssp->delay_ms[type];
++		ssp->enabled &= ~BIT(type);
++		return ssp_ack_cmd(ssp, tx, sizeof(tx));
++	}
++
++	tx[4] = ssp_quantize_delay(ms, &tx[3]);
++	if (ssp->enabled & BIT(type)) {
++		if (ssp->delay_ms[type] == tx[4])
++			return 0;
++		tx[1] = SSP_INST_CHANGE_DELAY;
++	} else {
++		tx[1] = SSP_INST_ADD;
++		if (type == SSP_PROX)
++			ssp_set_prox_threshold(ssp);
++	}
++
++	ret = ssp_ack_cmd(ssp, tx, sizeof(tx));
++	if (ret)
++		return ret;
++
++	ssp->cmd_fails = 0;
++	ssp->delay_cmd[type] = tx[3];
++	ssp->delay_ms[type] = tx[4];
++	if (!(ssp->enabled & BIT(type))) {
++		ssp->enabled |= BIT(type);
++		if (type == SSP_PROX) {
++			/* the MCU only reports changes: start out as "far" */
++			struct ssp_event ev = {
++				.timestamp = ktime_get_boottime_ns(),
++				.sensor = SSP_PROX,
++			};
++
++			ssp_push_event(ssp, &ev);
++		}
++	}
++	return 0;
++}
++
++static int ssp_init_mcu(struct ssp_data *ssp)
++{
++	struct device *dev = &ssp->client->dev;
++	u8 tx[5], rx[3], *rom;
++	unsigned int len, cur, prev;
++	s64 wait;
++	int ret, i, n;
++
++	/* the application needs a moment after reset; the MCU doesn't answer meanwhile */
++	msleep(1000);
++	for (i = 0; i < 10; i++) {
++		msleep(300);
++		tx[0] = SSP_WHOAMI;
++		rx[0] = 0;
++		ret = ssp_read_cmd(ssp, tx, 1, rx, 1);
++		dev_dbg(dev, "whoami: %d, %02x\n", ret, rx[0]);
++		if (!ret && rx[0] == SSP_DEVICE_ID)
++			break;
++	}
++	if (i == 10) {
++		dev_err(dev, "no MCU (%d, id %02x)\n", ret, rx[0]);
++		return -ENODEV;
++	}
++
++	tx[0] = SSP_FIRMWARE_REV;
++	ret = ssp_read_cmd(ssp, tx, 1, rx, 3);
++	dev_dbg(dev, "firmware rev: %d, %02x %02x %02x\n", ret, rx[0], rx[1], rx[2]);
++	if (ret)
++		return ret;
++	ssp->fw_rev = get_unaligned_be24(rx);
++
++	tx[0] = SSP_SENSOR_FORMATION;
++	tx[1] = tx[2] = tx[3] = SSP_POSITION;
++	tx[4] = 0;
++	ret = ssp_ack_cmd(ssp, tx, 5);
++	if (ret)
++		return ret;
++
++	/* AK8963C fuse ROM: sensitivity adjustment values */
++	tx[0] = SSP_STT;
++	tx[1] = SSP_FUSEROM;
++	ret = ssp_read_cmd(ssp, tx, 2, rx, 2);
++	len = get_unaligned_be16(rx);
++	dev_dbg(dev, "fuse ROM length: %d, %u\n", ret, len);
++	if (!ret && len >= 3 && len <= sizeof(ssp->frame)) {
++		rom = ssp->frame;
++		tx[0] = SSP_SRM;
++		mutex_lock(&ssp->xfer_lock);
++		ret = ssp_xfer(ssp, tx, 1, rom, len, 3);
++		if (!ret)
++			memcpy(ssp->mag_asa, rom, 3);
++		mutex_unlock(&ssp->xfer_lock);
++	}
++	if (ret || len < 3)
++		dev_warn(dev, "can't read the magnetometer fuse ROM (%d, length %u)\n", ret, len);
++
++	/*
++	 * The MCU brings its sensors up one after the other and the list grows meanwhile: ask
++	 * no earlier than Samsung does (3 s after the reset), then until it stays the same for
++	 * a second
++	 */
++	wait = ktime_ms_delta(ktime_add_ms(ssp->reset_time, 3000), ktime_get());
++	if (wait > 0)
++		msleep(wait);
++	for (i = 0, n = 0, cur = prev = 0; i < 20 && n < 4; i++) {
++		if (i)
++			msleep(250);
++		tx[0] = SSP_SENSOR_SCANNING;
++		ret = ssp_read_cmd(ssp, tx, 1, rx, 2);
++		cur = ret ? 0 : get_unaligned_be16(rx);
++		dev_dbg(dev, "scanning: %d, %#x\n", ret, cur);
++		n = cur && cur == prev ? n + 1 : 1;
++		prev = cur;
++	}
++	ssp->available = cur;
++	if (!ssp->available) {
++		dev_err(dev, "the MCU found no sensors (%d)\n", ret);
++		return ret ?: -EIO;
++	}
++
++	ssp->cmd_fails = 0;
++	dev_info(dev, "firmware %u, sensors %#x, fuse ROM %u %u %u\n", ssp->fw_rev,
++		 ssp->available, ssp->mag_asa[0], ssp->mag_asa[1], ssp->mag_asa[2]);
++	return 0;
++}
++
++/* Reset the MCU and let its bootloader start the application right away */
++static void ssp_reset_mcu(struct ssp_data *ssp)
++{
++	u8 buf[2] = { 0, 0 }, status = 0;
++	struct i2c_msg msg = { .addr = SSP_BOOTLOADER_ADDR, .len = 2, .buf = buf };
++	struct i2c_msg rd = { .addr = SSP_BOOTLOADER_ADDR, .flags = I2C_M_RD, .len = 1,
++			      .buf = &status };
++
++	/* Samsung pulses 10 us; after boot the MCU then came up with only some of its sensors */
++	gpiod_set_value_cansleep(ssp->reset, 1);
++	msleep(10);
++	gpiod_set_value_cansleep(ssp->reset, 0);
++	ssp->reset_time = ktime_get();
++	msleep(50);
++
++	mutex_lock(&ssp->xfer_lock);
++	if (i2c_transfer(ssp->client->adapter, &rd, 1) == 1)
++		dev_info(&ssp->client->dev, "bootloader status %02x%s\n", status,
++			 (status & 0xf0) == SSP_BL_APP_CRC_FAIL ? " (no valid firmware)" : "");
++	if (i2c_transfer(ssp->client->adapter, &msg, 1) != 1)
++		dev_dbg(&ssp->client->dev, "bootloader didn't take the start command\n");
++	mutex_unlock(&ssp->xfer_lock);
++}
++
++static void ssp_reset_work(struct work_struct *work)
++{
++	struct ssp_data *ssp = container_of(work, struct ssp_data, reset_work);
++	u32 enabled;
++	unsigned int i;
++
++	dev_warn(&ssp->client->dev, "MCU stopped answering, resetting it\n");
++	disable_irq(ssp->client->irq);
++	mutex_lock(&ssp->cmd_lock);
++	ssp_reset_mcu(ssp);
++	enable_irq(ssp->client->irq);
++	if (ssp_init_mcu(ssp)) {
++		mutex_unlock(&ssp->cmd_lock);
++		return;
++	}
++	enabled = ssp->enabled;
++	ssp->enabled = 0;
++	for (i = 0; i < SSP_SENSOR_MAX; i++)
++		if (enabled & BIT(i))
++			ssp_set_sensor(ssp, i, ssp->delay_ms[i]);
++	mutex_unlock(&ssp->cmd_lock);
++}
++
++/* A sensor the MCU only brought up after we asked */
++static void ssp_rescan_work(struct work_struct *work)
++{
++	struct ssp_data *ssp = container_of(to_delayed_work(work), struct ssp_data, rescan_work);
++	u8 tx = SSP_SENSOR_SCANNING, rx[2];
++	unsigned int cur;
++
++	mutex_lock(&ssp->cmd_lock);
++	if (!ssp_read_cmd(ssp, &tx, 1, rx, 2)) {
++		cur = get_unaligned_be16(rx);
++		if (cur & ~ssp->available) {
++			dev_info(&ssp->client->dev, "sensors %#x showed up late\n",
++				 cur & ~ssp->available);
++			ssp->available |= cur;
++		}
++	}
++	mutex_unlock(&ssp->cmd_lock);
++}
++
++/* "<sensor> <delay_ms>", sensor as number or name */
++static int ssp_parse_enable(const char *buf, unsigned int *type, unsigned int *ms)
++{
++	char name[16];
++	unsigned int i;
++
++	if (sscanf(buf, "%15s %u", name, ms) != 2)
++		return -EINVAL;
++	for (i = 0; i < SSP_SENSOR_MAX; i++)
++		if (!strcmp(name, ssp_sensor_names[i]))
++			break;
++	if (i == SSP_SENSOR_MAX && kstrtouint(name, 0, &i))
++		return -EINVAL;
++	*type = i;
++	return 0;
++}
++
++/* /dev/ssp_sensorhub */
++
++static int ssp_open(struct inode *inode, struct file *file)
++{
++	struct ssp_data *ssp = container_of(file->private_data, struct ssp_data, misc);
++
++	if (atomic_xchg(&ssp->opened, 1))
++		return -EBUSY;
++	/* drop what a previous reader left (we're the only consumer) */
++	kfifo_reset_out(&ssp->fifo);
++	file->private_data = ssp;
++	return stream_open(inode, file);
++}
++
++static int ssp_release(struct inode *inode, struct file *file)
++{
++	struct ssp_data *ssp = file->private_data;
++	unsigned int i;
++
++	mutex_lock(&ssp->cmd_lock);
++	for (i = 0; i < SSP_SENSOR_MAX; i++)
++		if (ssp->enabled_by_file & BIT(i))
++			ssp_set_sensor(ssp, i, 0);
++	ssp->enabled_by_file = 0;
++	mutex_unlock(&ssp->cmd_lock);
++	atomic_set(&ssp->opened, 0);
++	return 0;
++}
++
++static ssize_t ssp_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos)
++{
++	struct ssp_data *ssp = file->private_data;
++	unsigned int copied;
++	int ret;
++
++	if (count < sizeof(struct ssp_event))
++		return -EINVAL;
++
++	while (kfifo_is_empty(&ssp->fifo)) {
++		if (file->f_flags & O_NONBLOCK)
++			return -EAGAIN;
++		ret = wait_event_interruptible(ssp->wq, !kfifo_is_empty(&ssp->fifo));
++		if (ret)
++			return ret;
++	}
++
++	ret = kfifo_to_user(&ssp->fifo, ubuf, count, &copied);
++	return ret ? ret : copied;
++}
++
++static ssize_t ssp_write(struct file *file, const char __user *ubuf, size_t count,
++			 loff_t *ppos)
++{
++	struct ssp_data *ssp = file->private_data;
++	unsigned int type, ms;
++	char buf[32];
++	int ret;
++
++	if (count >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, ubuf, count))
++		return -EFAULT;
++	buf[count] = 0;
++	ret = ssp_parse_enable(buf, &type, &ms);
++	if (ret)
++		return ret;
++
++	mutex_lock(&ssp->cmd_lock);
++	ret = ssp_set_sensor(ssp, type, ms);
++	if (!ret && ms)
++		ssp->enabled_by_file |= BIT(type);
++	else if (!ms)
++		ssp->enabled_by_file &= ~BIT(type);
++	mutex_unlock(&ssp->cmd_lock);
++	return ret ? ret : count;
++}
++
++static __poll_t ssp_poll(struct file *file, poll_table *wait)
++{
++	struct ssp_data *ssp = file->private_data;
++
++	poll_wait(file, &ssp->wq, wait);
++	return kfifo_is_empty(&ssp->fifo) ? 0 : EPOLLIN | EPOLLRDNORM;
++}
++
++static const struct file_operations ssp_fops = {
++	.owner = THIS_MODULE,
++	.open = ssp_open,
++	.release = ssp_release,
++	.read = ssp_read,
++	.write = ssp_write,
++	.poll = ssp_poll,
++};
++
++/* sysfs */
++
++static ssize_t info_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "firmware %u\navailable %#x\nenabled %#x\ndropped %lu\n",
++			  ssp->fw_rev, ssp->available, ssp->enabled, ssp->dropped);
++}
++static DEVICE_ATTR_RO(info);
++
++static ssize_t data_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++	unsigned int i;
++	int n = 0;
++
++	for (i = 0; i < SSP_SENSOR_MAX; i++) {
++		const struct ssp_event *ev = &ssp->last[i];
++
++		if (!(ssp->available & BIT(i)))
++			continue;
++		n += sysfs_emit_at(buf, n, "%-8s %d %d %d %d @%lld\n", ssp_sensor_names[i],
++				   ev->data[0], ev->data[1], ev->data[2], ev->data[3],
++				   ev->timestamp);
++	}
++	return n;
++}
++static DEVICE_ATTR_RO(data);
++
++static ssize_t enable_store(struct device *dev, struct device_attribute *attr,
++			    const char *buf, size_t count)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++	unsigned int type, ms;
++	int ret;
++
++	ret = ssp_parse_enable(buf, &type, &ms);
++	if (ret)
++		return ret;
++	mutex_lock(&ssp->cmd_lock);
++	ret = ssp_set_sensor(ssp, type, ms);
++	mutex_unlock(&ssp->cmd_lock);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(enable);
++
++static ssize_t mag_asa_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%u %u %u\n", ssp->mag_asa[0], ssp->mag_asa[1], ssp->mag_asa[2]);
++}
++static DEVICE_ATTR_RO(mag_asa);
++
++static ssize_t prox_threshold_show(struct device *dev, struct device_attribute *attr,
++				   char *buf)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf, "%u %u\n", ssp->prox_hi, ssp->prox_canc);
++}
++
++static ssize_t prox_threshold_store(struct device *dev, struct device_attribute *attr,
++				    const char *buf, size_t count)
++{
++	struct ssp_data *ssp = dev_get_drvdata(dev);
++	unsigned int hi, canc;
++	int ret = 0;
++
++	if (sscanf(buf, "%u %u", &hi, &canc) != 2 || hi > 255 || canc > 255)
++		return -EINVAL;
++	mutex_lock(&ssp->cmd_lock);
++	ssp->prox_hi = hi;
++	ssp->prox_canc = canc;
++	if (ssp->enabled & BIT(SSP_PROX))
++		ret = ssp_set_prox_threshold(ssp);
++	mutex_unlock(&ssp->cmd_lock);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_RW(prox_threshold);
++
++static struct attribute *ssp_attrs[] = {
++	&dev_attr_info.attr,
++	&dev_attr_data.attr,
++	&dev_attr_enable.attr,
++	&dev_attr_mag_asa.attr,
++	&dev_attr_prox_threshold.attr,
++	NULL
++};
++ATTRIBUTE_GROUPS(ssp);
++
++static int ssp_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct ssp_data *ssp;
++	int ret;
++
++	ssp = devm_kzalloc(dev, sizeof(*ssp), GFP_KERNEL);
++	if (!ssp)
++		return -ENOMEM;
++	ssp->client = client;
++	ssp->prox_hi = SSP_PROX_HI_THRESHOLD;
++	mutex_init(&ssp->cmd_lock);
++	mutex_init(&ssp->xfer_lock);
++	spin_lock_init(&ssp->fifo_lock);
++	init_waitqueue_head(&ssp->wq);
++	INIT_KFIFO(ssp->fifo);
++	INIT_WORK(&ssp->reset_work, ssp_reset_work);
++	INIT_DELAYED_WORK(&ssp->rescan_work, ssp_rescan_work);
++	i2c_set_clientdata(client, ssp);
++
++	ssp->ap_mcu_int = devm_gpiod_get(dev, "ap-mcu-int", GPIOD_OUT_HIGH);
++	if (IS_ERR(ssp->ap_mcu_int))
++		return dev_err_probe(dev, PTR_ERR(ssp->ap_mcu_int), "ap-mcu-int gpio\n");
++	ssp->mcu_ap_int2 = devm_gpiod_get(dev, "mcu-ap-int2", GPIOD_IN);
++	if (IS_ERR(ssp->mcu_ap_int2))
++		return dev_err_probe(dev, PTR_ERR(ssp->mcu_ap_int2), "mcu-ap-int2 gpio\n");
++	/* the IRQ line: request it as input before the IRQ switches the pin to EINT */
++	ssp->mcu_ap_int = devm_gpiod_get(dev, "mcu-ap-int", GPIOD_IN);
++	if (IS_ERR(ssp->mcu_ap_int))
++		return dev_err_probe(dev, PTR_ERR(ssp->mcu_ap_int), "mcu-ap-int gpio\n");
++	/* held in reset until now (the pin's default pull-down) */
++	ssp->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(ssp->reset))
++		return dev_err_probe(dev, PTR_ERR(ssp->reset), "reset gpio\n");
++	/*
++	 * Supply of the light/proximity sensor and the barometer. It has to be on before the MCU
++	 * boots: it only looks for its sensors then.
++	 */
++	ret = devm_regulator_get_enable(dev, "vdd");
++	if (ret)
++		return dev_err_probe(dev, ret, "vdd supply\n");
++
++	ssp_reset_mcu(ssp);
++	ret = ssp_init_mcu(ssp);
++	if (ret)
++		goto err_reset;
++
++	ret = devm_request_threaded_irq(dev, client->irq, ssp_irq, ssp_irq_thread, IRQF_ONESHOT,
++					"ssp", ssp);
++	if (ret) {
++		dev_err(dev, "can't request IRQ %d: %d\n", client->irq, ret);
++		goto err_reset;
++	}
++	/* data the MCU announced before we listened (its edge is lost): fetch it once */
++	if (!gpiod_get_value_cansleep(ssp->mcu_ap_int)) {
++		ssp_irq(client->irq, ssp);
++		ssp_irq_thread(client->irq, ssp);
++	}
++
++	ssp->misc.minor = MISC_DYNAMIC_MINOR;
++	ssp->misc.name = "ssp_sensorhub";
++	ssp->misc.fops = &ssp_fops;
++	ssp->misc.parent = dev;
++	ret = misc_register(&ssp->misc);
++	if (ret)
++		goto err_reset;
++
++	ssp->ready = true;
++	schedule_delayed_work(&ssp->rescan_work, 10 * HZ);
++	return 0;
++
++err_reset:
++	gpiod_set_value_cansleep(ssp->reset, 1);
++	return ret;
++}
++
++static void ssp_remove(struct i2c_client *client)
++{
++	struct ssp_data *ssp = i2c_get_clientdata(client);
++	unsigned int i;
++
++	ssp->ready = false;
++	misc_deregister(&ssp->misc);
++	cancel_delayed_work_sync(&ssp->rescan_work);
++	cancel_work_sync(&ssp->reset_work);
++	disable_irq(client->irq);
++	mutex_lock(&ssp->cmd_lock);
++	for (i = 0; i < SSP_SENSOR_MAX; i++)
++		if (ssp->enabled & BIT(i))
++			ssp_set_sensor(ssp, i, 0);
++	mutex_unlock(&ssp->cmd_lock);
++	gpiod_set_value_cansleep(ssp->reset, 1);
++}
++
++static const struct of_device_id ssp_of_match[] = {
++	{ .compatible = "samsung,midas-ssp" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, ssp_of_match);
++
++static struct i2c_driver ssp_driver = {
++	.driver = {
++		.name = "samsung-ssp",
++		.of_match_table = ssp_of_match,
++		.dev_groups = ssp_groups,
++		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
++	},
++	.probe = ssp_probe,
++	.remove = ssp_remove,
++};
++module_i2c_driver(ssp_driver);
++
++MODULE_DESCRIPTION("Samsung SSP sensor hub (Galaxy Note II)");
++MODULE_LICENSE("GPL");
+-- 
+2.53.0
+

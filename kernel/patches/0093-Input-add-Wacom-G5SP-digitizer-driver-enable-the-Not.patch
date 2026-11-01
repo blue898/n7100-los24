@@ -1,0 +1,336 @@
+From 97e521cc3a56b0a7294b21e15690290a775a2afd Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 22:29:38 +0100
+Subject: [PATCH] Input: add Wacom G5SP digitizer driver, enable the Note II S
+ Pen
+
+The Galaxy Note II's Wacom digitizer (I2C5, 0x56) speaks Wacom's old
+single-byte command protocol (COM_QUERY 0x2a, 8-byte coordinate records),
+not the HID-style protocol of wacom_i2c. Add a small driver for it and
+describe it in the N710x device tree: PEN_LDO_EN (gpf2-5) as a fixed
+regulator, reset on gpy2-1, interrupt on gpx0-4 (rising edge), and the
+firmware-update strap PEN_FWE1 (gpy1-3) hogged low. Pins and power
+sequence (LDO on, 100 ms, release reset) from Samsung's T0 board file.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/samsung/exynos4412-n710x.dtsi    |  50 ++++-
+ drivers/input/touchscreen/Kconfig             |  10 +
+ drivers/input/touchscreen/Makefile            |   1 +
+ drivers/input/touchscreen/wacom_g5sp_i2c.c    | 205 ++++++++++++++++++
+ 4 files changed, 265 insertions(+), 1 deletion(-)
+ create mode 100755 drivers/input/touchscreen/wacom_g5sp_i2c.c
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 0e2cc4d82..306e66bbb 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -27,6 +27,15 @@ ramoops@46000000 {
+ 
+ 	/* bootargs are passed in by bootloader */
+ 
++	pen_ldo_reg: voltage-regulator-11 {
++		compatible = "regulator-fixed";
++		regulator-name = "PEN_LDO_EN";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		gpio = <&gpf2 5 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++	};
++
+ 	cam_vdda_reg: voltage-regulator-10 {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "CAM_SENSOR_CORE_1.2V";
+@@ -248,5 +257,44 @@ &touchkey_reg {
+  * (CONFIG_ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND).
+  */
+ &{/chosen} {
+-	bootargs = "console=tty0 panic=10 s3c2410_wdt.tmr_atboot=1 androidboot.init_fatal_reboot_target=normal androidboot.hardware=n7100 androidboot.selinux=permissive androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
++	bootargs = "console=tty0 panic=10 s3c2410_wdt.tmr_atboot=1 printk.devkmsg=on sysctl.net.core.bpf_jit_enable=1 androidboot.init_fatal_reboot_target=recovery androidboot.hardware=n7100 androidboot.selinux=permissive androidboot.boot_devices=soc/12550000.mmc firmware_class.path=/vendor/firmware";
++};
++
++/*
++ * Bring-up: Android's "reboot bootloader" (init_fatal / reboot_on_failure, e.g.
++ * bootstrap-apexd-failed) lands in TWRP (RECOVERY) instead of download mode, where
++ * the previous boot's console can still be read from ramoops.
++ */
++&pmu_system_controller {
++	reboot-mode {
++		mode-bootloader = <BOOT_RECOVERY>;
++		/* Android's reboot_on_failure targets: land in TWRP instead of looping */
++		mode-apexd-failed = <BOOT_RECOVERY>;
++		mode-bpfloader-failed = <BOOT_RECOVERY>;
++		mode-netbpfload-missing = <BOOT_RECOVERY>;
++		mode-netd1shot-fail = <BOOT_RECOVERY>;
++		mode-vold-failed = <BOOT_RECOVERY>;
++		mode-boringssl-self-check-failed = <BOOT_RECOVERY>;
++	};
++};
++
++&gpy1 {
++	/* digitizer firmware-update strap, low for normal operation */
++	pen-fwe1-hog {
++		gpio-hog;
++		gpios = <3 GPIO_ACTIVE_HIGH>;
++		output-low;
++		line-name = "PEN_FWE1";
++	};
++};
++
++&i2c_5 {
++	digitizer@56 {
++		compatible = "wacom,g5sp-i2c";
++		reg = <0x56>;
++		interrupt-parent = <&gpx0>;
++		interrupts = <4 IRQ_TYPE_EDGE_RISING>;
++		vdd-supply = <&pen_ldo_reg>;
++		reset-gpios = <&gpy2 1 GPIO_ACTIVE_LOW>;
++	};
+ };
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 9b9ae8ac3..ad7feb646 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -610,6 +610,16 @@ config TOUCHSCREEN_WACOM_I2C
+ 	  To compile this driver as a module, choose M here: the module
+ 	  will be called wacom_i2c.
+ 
++config TOUCHSCREEN_WACOM_G5SP_I2C
++	tristate "Wacom G5SP digitizer (Galaxy Note II S Pen)"
++	depends on I2C
++	help
++	  Say Y here to support the Wacom G5SP EMR digitizer of the Samsung
++	  Galaxy Note II, which uses Wacom's single-byte command protocol.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called wacom_g5sp_i2c.
++
+ config TOUCHSCREEN_WACOM_W9000
+ 	tristate "Wacom W9000-series penabled touchscreen (I2C)"
+ 	depends on I2C
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index bfd9de833..5b787813d 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -100,6 +100,7 @@ tsc2007-$(CONFIG_TOUCHSCREEN_TSC2007_IIO)	+= tsc2007_iio.o
+ obj-$(CONFIG_TOUCHSCREEN_TSC2007)	+= tsc2007.o
+ obj-$(CONFIG_TOUCHSCREEN_WACOM_W8001)	+= wacom_w8001.o
+ obj-$(CONFIG_TOUCHSCREEN_WACOM_I2C)	+= wacom_i2c.o
++obj-$(CONFIG_TOUCHSCREEN_WACOM_G5SP_I2C)	+= wacom_g5sp_i2c.o
+ obj-$(CONFIG_TOUCHSCREEN_WACOM_W9000)	+= wacom_w9000.o
+ obj-$(CONFIG_TOUCHSCREEN_WDT87XX_I2C)	+= wdt87xx_i2c.o
+ obj-$(CONFIG_TOUCHSCREEN_WM831X)	+= wm831x-ts.o
+diff --git a/drivers/input/touchscreen/wacom_g5sp_i2c.c b/drivers/input/touchscreen/wacom_g5sp_i2c.c
+new file mode 100755
+index 000000000..e25deb808
+--- /dev/null
++++ b/drivers/input/touchscreen/wacom_g5sp_i2c.c
+@@ -0,0 +1,205 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Wacom G5SP EMR digitizer (Samsung Galaxy Note II S Pen) over I2C
++ *
++ * The controller speaks Wacom's old single-byte command protocol rather than
++ * the HID-style one wacom_i2c.c implements: COM_QUERY (0x2a) answers with a
++ * 9-byte record starting with 0x0f, and every pen interrupt delivers an
++ * 8-byte coordinate record. Protocol details from Samsung's GPL kernel
++ * (drivers/input/touchscreen/wacom/wacom_i2c_func.c).
++ */
++
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
++#include <linux/unaligned.h>
++
++#define G5SP_COM_QUERY		0x2a
++#define G5SP_QUERY_LEN		9
++#define G5SP_QUERY_MAGIC	0x0f
++#define G5SP_COORD_LEN		8
++
++/* coordinate record, byte 0 */
++#define G5SP_PROX		BIT(4)	/* tip touches the screen */
++#define G5SP_STYLUS		BIT(5)	/* side button */
++#define G5SP_RUBBER		BIT(6)
++#define G5SP_RDY		BIT(7)	/* pen in range */
++
++/*
++ * Sensor coordinates: x along the long edge, y along the short one. Samsung's
++ * T0 board data inverts x and swaps the axes for the portrait panel.
++ */
++#define G5SP_MAX_X		12288
++#define G5SP_MAX_Y		6912
++#define G5SP_MAX_PRESSURE	1023
++/* sensor position of the panel's corner (Samsung's origin_offset, B713/B746 digitizers) */
++#define G5SP_ORIGIN_X		676
++#define G5SP_ORIGIN_Y		724
++
++struct wacom_g5sp {
++	struct i2c_client *client;
++	struct input_dev *input;
++	struct regulator *vdd;
++	struct gpio_desc *reset;
++	unsigned int tool;
++};
++
++static void wacom_g5sp_power(struct wacom_g5sp *wac, bool on)
++{
++	if (on) {
++		if (regulator_enable(wac->vdd))
++			dev_err(&wac->client->dev, "failed to enable vdd\n");
++		msleep(100);
++		gpiod_set_value_cansleep(wac->reset, 0);
++	} else {
++		gpiod_set_value_cansleep(wac->reset, 1);
++		regulator_disable(wac->vdd);
++	}
++}
++
++static int wacom_g5sp_query(struct wacom_g5sp *wac)
++{
++	struct i2c_client *client = wac->client;
++	u8 cmd = G5SP_COM_QUERY;
++	u8 data[G5SP_QUERY_LEN];
++	int i, ret;
++
++	for (i = 0; i < 10; i++) {
++		ret = i2c_master_send(client, &cmd, 1);
++		if (ret == 1) {
++			msleep(100);
++			ret = i2c_master_recv(client, data, sizeof(data));
++			if (ret == sizeof(data) && data[0] == G5SP_QUERY_MAGIC) {
++				dev_info(&client->dev, "firmware 0x%04x\n",
++					 get_unaligned_be16(&data[7]));
++				return 0;
++			}
++		}
++		msleep(20);
++	}
++
++	return ret < 0 ? ret : -ENODEV;
++}
++
++static irqreturn_t wacom_g5sp_irq(int irq, void *dev_id)
++{
++	struct wacom_g5sp *wac = dev_id;
++	struct input_dev *input = wac->input;
++	u8 data[G5SP_COORD_LEN];
++	int x, y;
++
++	if (i2c_master_recv(wac->client, data, sizeof(data)) != sizeof(data))
++		return IRQ_HANDLED;
++
++	if (!(data[0] & G5SP_RDY)) {
++		/* pen left the sensing range */
++		if (wac->tool) {
++			input_report_abs(input, ABS_PRESSURE, 0);
++			input_report_key(input, BTN_TOUCH, 0);
++			input_report_key(input, BTN_STYLUS, 0);
++			input_report_key(input, wac->tool, 0);
++			input_sync(input);
++			wac->tool = 0;
++		}
++		return IRQ_HANDLED;
++	}
++
++	if (!wac->tool)
++		wac->tool = data[0] & G5SP_RUBBER ? BTN_TOOL_RUBBER : BTN_TOOL_PEN;
++
++	x = clamp(get_unaligned_be16(&data[1]) - G5SP_ORIGIN_X, 0, G5SP_MAX_X);
++	y = clamp(get_unaligned_be16(&data[3]) - G5SP_ORIGIN_Y, 0, G5SP_MAX_Y);
++
++	input_report_abs(input, ABS_X, y);
++	input_report_abs(input, ABS_Y, G5SP_MAX_X - x);
++	input_report_abs(input, ABS_PRESSURE,
++			 min_t(unsigned int, get_unaligned_be16(&data[5]),
++			       G5SP_MAX_PRESSURE));
++	input_report_key(input, BTN_TOUCH, !!(data[0] & G5SP_PROX));
++	input_report_key(input, BTN_STYLUS, !!(data[0] & G5SP_STYLUS));
++	input_report_key(input, wac->tool, 1);
++	input_sync(input);
++
++	return IRQ_HANDLED;
++}
++
++static void wacom_g5sp_power_off(void *data)
++{
++	wacom_g5sp_power(data, false);
++}
++
++static int wacom_g5sp_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct wacom_g5sp *wac;
++	struct input_dev *input;
++	int error;
++
++	wac = devm_kzalloc(dev, sizeof(*wac), GFP_KERNEL);
++	if (!wac)
++		return -ENOMEM;
++	wac->client = client;
++
++	wac->vdd = devm_regulator_get(dev, "vdd");
++	if (IS_ERR(wac->vdd))
++		return PTR_ERR(wac->vdd);
++
++	wac->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(wac->reset))
++		return PTR_ERR(wac->reset);
++
++	wacom_g5sp_power(wac, true);
++	error = devm_add_action_or_reset(dev, wacom_g5sp_power_off, wac);
++	if (error)
++		return error;
++
++	error = wacom_g5sp_query(wac);
++	if (error)
++		return dev_err_probe(dev, error, "no answer to query\n");
++
++	input = devm_input_allocate_device(dev);
++	if (!input)
++		return -ENOMEM;
++	wac->input = input;
++
++	input->name = "sec_e-pen";
++	input->id.bustype = BUS_I2C;
++	__set_bit(INPUT_PROP_DIRECT, input->propbit);
++	input_set_capability(input, EV_KEY, BTN_TOOL_PEN);
++	input_set_capability(input, EV_KEY, BTN_TOOL_RUBBER);
++	input_set_capability(input, EV_KEY, BTN_TOUCH);
++	input_set_capability(input, EV_KEY, BTN_STYLUS);
++	input_set_abs_params(input, ABS_X, 0, G5SP_MAX_Y, 0, 0);
++	input_set_abs_params(input, ABS_Y, 0, G5SP_MAX_X, 0, 0);
++	input_set_abs_params(input, ABS_PRESSURE, 0, G5SP_MAX_PRESSURE, 0, 0);
++
++	error = devm_request_threaded_irq(dev, client->irq, NULL, wacom_g5sp_irq,
++					  IRQF_ONESHOT, "wacom_g5sp", wac);
++	if (error)
++		return error;
++
++	return input_register_device(input);
++}
++
++static const struct of_device_id wacom_g5sp_of_match[] = {
++	{ .compatible = "wacom,g5sp-i2c" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, wacom_g5sp_of_match);
++
++static struct i2c_driver wacom_g5sp_driver = {
++	.driver = {
++		.name = "wacom_g5sp_i2c",
++		.of_match_table = wacom_g5sp_of_match,
++	},
++	.probe = wacom_g5sp_probe,
++};
++module_i2c_driver(wacom_g5sp_driver);
++
++MODULE_DESCRIPTION("Wacom G5SP I2C digitizer (Galaxy Note II S Pen)");
++MODULE_LICENSE("GPL");
+-- 
+2.53.0
+

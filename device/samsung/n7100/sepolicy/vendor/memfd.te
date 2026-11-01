@@ -1,0 +1,10 @@
+# Mainline has no ashmem (sys.use_memfd): FMQs and shared buffers are memfds, labelled with the
+# tmpfs type of the process that created them. As with /dev/ashmem before, whoever is handed
+# the fd may map it.
+allow domain tmpfs:file { getattr map read write };
+allow { appdomain audioserver cameraserver mediaserver mediaswcodec surfaceflinger system_server
+        hal_audio_default hal_camera_default hal_power_default hal_sensors_default }
+      { appdomain_tmpfs system_server_tmpfs }:file { getattr map read write };
+# Apps run with MLS categories, the memfds of the media and system processes don't have any:
+# like ashmem_device, tmpfs must be writable across levels
+typeattribute tmpfs mlstrustedobject;

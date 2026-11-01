@@ -1,0 +1,26 @@
+From 8306a832cd8c118f909d2f21fdbbedc55a4dcae6 Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Thu, 21 Aug 2025 13:47:13 +0100
+Subject: [PATCH 72/89] USB: Add hardware IDs to qcserial driver
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ drivers/usb/serial/qcserial.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/usb/serial/qcserial.c b/drivers/usb/serial/qcserial.c
+index 105c0a0ea..aabe7479b 100644
+--- a/drivers/usb/serial/qcserial.c
++++ b/drivers/usb/serial/qcserial.c
+@@ -115,6 +115,8 @@ static const struct usb_device_id id_table[] = {
+ 	{USB_DEVICE(0x03f0, 0x371d)},	/* HP un2430 Gobi 3000 QDL */
+ 	{USB_DEVICE(0x05c6, 0x920c)},	/* Gobi 3000 QDL */
+ 	{USB_DEVICE(0x05c6, 0x920d)},	/* Gobi 3000 Composite */
++	{USB_DEVICE(0x05c6, 0x9048)},	/* MDM9x15 device */
++	{USB_DEVICE(0x05c6, 0x904c)},	/* MDM9x15 device */
+ 	{USB_DEVICE(0x1410, 0xa020)},   /* Novatel Gobi 3000 QDL */
+ 	{USB_DEVICE(0x1410, 0xa021)},	/* Novatel Gobi 3000 Composite */
+ 	{USB_DEVICE(0x413c, 0x8193)},	/* Dell Gobi 3000 QDL */
+-- 
+2.53.0
+

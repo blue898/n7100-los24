@@ -1,0 +1,4 @@
+# Samsung's legacy HAL (gps.default.so) talks to gpsd through pipes in /data/vendor/gps
+allow hal_gnss_default gps_vendor_data_file:dir rw_dir_perms;
+allow hal_gnss_default gps_vendor_data_file:{ file fifo_file } create_file_perms;
+wakelock_use(hal_gnss_default)

@@ -1,0 +1,90 @@
+From a97395feea47306cf5a0b1dfc6fbea2afbd54315 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Mon, 5 Aug 2024 17:53:00 +0200
+Subject: [PATCH 55/89] usb: exynos: ohci-exynos: Call phy_init and phy_exit on
+ init/remove
+
+Also set hcd->skip_phy_initialization = 1 so that the HCD core doesn't
+try to initialize the PHYs a second time.
+
+This fixes the following warnings:
+
+  phy phy-125b0000.usb-phy.6: phy_power_on was called before phy_init
+  phy phy-125b0000.usb-phy.7: phy_power_on was called before phy_init
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ drivers/usb/host/ohci-exynos.c | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/host/ohci-exynos.c b/drivers/usb/host/ohci-exynos.c
+index cc5cb0900..e75d816b9 100644
+--- a/drivers/usb/host/ohci-exynos.c
++++ b/drivers/usb/host/ohci-exynos.c
+@@ -51,7 +51,7 @@ static int exynos_ohci_get_phy(struct device *dev,
+ 		exynos_ohci->phy[phy_number] = phy;
+ 	}
+ 	if (num_phys > 0)
+-		return 0;
++		goto init_phys;
+ 
+ 	/* Get PHYs using legacy bindings */
+ 	for_each_available_child_of_node_scoped(dev->of_node, child) {
+@@ -73,6 +73,12 @@ static int exynos_ohci_get_phy(struct device *dev,
+ 	}
+ 
+ 	exynos_ohci->legacy_phy = true;
++
++init_phys:
++	for (phy_number = 0; phy_number < PHY_NUMBER; phy_number++) {
++		phy_init(exynos_ohci->phy[phy_number]);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -102,6 +108,16 @@ static void exynos_ohci_phy_disable(struct device *dev)
+ 		phy_power_off(exynos_ohci->phy[i]);
+ }
+ 
++static void exynos_ohci_phy_exit(struct device *dev)
++{
++	struct usb_hcd *hcd = dev_get_drvdata(dev);
++	struct exynos_ohci_hcd *exynos_ohci = to_exynos_ohci(hcd);
++	int i;
++
++	for (i = 0; i < PHY_NUMBER; i++)
++		phy_exit(exynos_ohci->phy[i]);
++}
++
+ static int exynos_ohci_probe(struct platform_device *pdev)
+ {
+ 	struct exynos_ohci_hcd *exynos_ohci;
+@@ -128,6 +144,8 @@ static int exynos_ohci_probe(struct platform_device *pdev)
+ 
+ 	exynos_ohci = to_exynos_ohci(hcd);
+ 
++	hcd->skip_phy_initialization = 1;
++
+ 	err = exynos_ohci_get_phy(&pdev->dev, exynos_ohci);
+ 	if (err)
+ 		goto fail_io;
+@@ -180,6 +198,7 @@ static int exynos_ohci_probe(struct platform_device *pdev)
+ 
+ fail_add_hcd:
+ 	exynos_ohci_phy_disable(&pdev->dev);
++	exynos_ohci_phy_exit(&pdev->dev);
+ 	pdev->dev.of_node = exynos_ohci->of_node;
+ fail_io:
+ 	usb_put_hcd(hcd);
+@@ -196,6 +215,7 @@ static void exynos_ohci_remove(struct platform_device *pdev)
+ 	usb_remove_hcd(hcd);
+ 
+ 	exynos_ohci_phy_disable(&pdev->dev);
++	exynos_ohci_phy_exit(&pdev->dev);
+ 
+ 	usb_put_hcd(hcd);
+ }
+-- 
+2.53.0
+

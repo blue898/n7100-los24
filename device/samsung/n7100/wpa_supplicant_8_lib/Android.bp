@@ -1,0 +1,20 @@
+// wpa_supplicant private driver commands for mainline brcmfmac (plain nl80211). Based on
+// Cuttlefish's lib_driver_cmd_simulated_cf_bp, plus COUNTRY: Android sets the Wi-Fi country
+// code only through this private command.
+cc_library_static {
+    name: "lib_driver_cmd_n7100",
+    srcs: ["driver_cmd_nl80211.c"],
+    cflags: [
+        "-DCONFIG_ANDROID_LOG",
+        "-Wno-unused-parameter",
+    ],
+    header_libs: [
+        "wpa_supplicant_headers",
+    ],
+    shared_libs: [
+        "libc",
+        "libcutils",
+        "libnl",
+    ],
+    soc_specific: true,
+}

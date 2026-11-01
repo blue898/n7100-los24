@@ -1,0 +1,49 @@
+From c233c2e9e79155fb6cfd245134cafa3c90882ff7 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Mon, 27 May 2024 18:40:38 +0200
+Subject: [PATCH 41/89] ARM: dts: samsung: exynos4212-tab3: Add battery node
+ with charge current value
+
+This value was verified by comparing register dumps of the MAX77693
+charger with on mainline with a downstream kernel under Android; the
+value on downstream was set to 1.8 amps when charging with a proper
+charger.
+
+Add it to a new battery node and pass it to the MAX77693 charger
+so that the fast charge current setting can be used for charging.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+Changes in v2:
+- Switched to monitored-battery
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 95e0312a6..784e3b95e 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -159,6 +159,7 @@ charger_reg: CHARGER {
+ 
+ 			charger {
+ 				compatible = "maxim,max77693-charger";
++				monitored-battery = <&battery>;
+ 
+ 				maxim,constant-microvolt = <4350000>;
+ 				maxim,min-system-microvolt = <3600000>;
+@@ -295,6 +296,11 @@ earmic_bias_reg: voltage-regulator-4 {
+ 		enable-active-high;
+ 	};
+ 
++	battery: battery {
++		compatible = "simple-battery";
++		constant-charge-current-max-microamp = <1800000>;
++	};
++
+ 	sound: sound {
+ 		compatible = "samsung,tab3-audio", "samsung,midas-audio";
+ 		model = "TAB3";
+-- 
+2.53.0
+

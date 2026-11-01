@@ -1,0 +1,32 @@
+From a18d424e9daa9744eef7e2e3a383b904e9bc71c4 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 22:13:43 +0100
+Subject: [PATCH 92/92] power: supply: max17042: clamp the reported capacity to
+ 100 %
+
+Without a custom fuel gauge model (the Galaxy Note II's MAX17047 has no
+cell data in DT) VFSOC reads slightly above 100 % on a full battery, and
+userspace (Android's health HAL) shows "101 %".
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/max17042_battery.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
+index 505a68c26..b2dc015e5 100644
+--- a/drivers/power/supply/max17042_battery.c
++++ b/drivers/power/supply/max17042_battery.c
+@@ -354,7 +354,8 @@ static int max17042_get_property(struct power_supply *psy,
+ 		if (ret < 0)
+ 			return ret;
+ 
+-		val->intval = data >> 8;
++		/* uncalibrated gauges (no custom model) read slightly above 100 % */
++		val->intval = min(data >> 8, 100U);
+ 		break;
+ 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+ 		ret = regmap_read(map, MAX17042_DesignCap, &data);
+-- 
+2.53.0
+

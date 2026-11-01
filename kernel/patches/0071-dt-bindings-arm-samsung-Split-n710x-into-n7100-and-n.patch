@@ -1,0 +1,28 @@
+From 4d39026fd09e16abd3e0687534cfb2c9848cadd3 Mon Sep 17 00:00:00 2001
+From: Jack Knightly <J__A__K@hotmail.com>
+Date: Thu, 21 Aug 2025 13:46:31 +0100
+Subject: [PATCH 71/89] dt-bindings: arm: samsung: Split n710x into n7100 and
+ n7105
+
+Signed-off-by: Jack Knightly <J__A__K@hotmail.com>
+---
+ .../devicetree/bindings/arm/samsung/samsung-boards.yaml        | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml b/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
+index 787d2cc98..1c2d6ef41 100644
+--- a/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
++++ b/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
+@@ -100,7 +100,8 @@ properties:
+           - enum:
+               - samsung,i9300                   # Samsung GT-I9300
+               - samsung,i9305                   # Samsung GT-I9305
+-              - samsung,n710x                   # Samsung GT-N7100/GT-N7105
++              - samsung,n7100                   # Samsung GT-N7100
++              - samsung,n7105                   # Samsung GT-N7105
+               - samsung,trats2                  # Samsung Tizen Reference
+           - const: samsung,midas
+           - const: samsung,exynos4412
+-- 
+2.53.0
+

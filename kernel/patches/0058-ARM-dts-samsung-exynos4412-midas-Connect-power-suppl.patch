@@ -1,0 +1,38 @@
+From 4cf89c2f2c791bb51e6faa9ec72ec760cea02762 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Wed, 14 Aug 2024 16:07:10 +0200
+Subject: [PATCH 58/89] ARM: dts: samsung: exynos4412-midas: Connect power
+ supply node to fuel gauge
+
+This allows us to read the battery status property.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-midas.dtsi | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+index 6a6bf5f3b..313dd2f75 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+@@ -231,7 +231,7 @@ motor-driver {
+ 				pwms = <&pwm 0 38022 0>;
+ 			};
+ 
+-			charger {
++			max77693_charger: charger {
+ 				compatible = "maxim,max77693-charger";
+ 				monitored-battery = <&battery>;
+ 
+@@ -262,6 +262,8 @@ fuel-gauge@36 {
+ 			pinctrl-0 = <&max77693_fuel_irq>;
+ 			reg = <0x36>;
+ 
++			power-supplies = <&max77693_charger>;
++
+ 			maxim,over-heat-temp = <700>;
+ 			maxim,over-volt = <4500>;
+ 		};
+-- 
+2.53.0
+

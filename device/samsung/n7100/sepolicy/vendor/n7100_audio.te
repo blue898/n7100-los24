@@ -1,0 +1,11 @@
+# n7100-audio.sh: WM1811 mixer routing with tinymix at boot
+type n7100_audio, domain;
+type n7100_audio_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(n7100_audio)
+
+allow n7100_audio vendor_shell_exec:file rx_file_perms;
+allow n7100_audio vendor_toolbox_exec:file rx_file_perms;
+allow n7100_audio vendor_file:file rx_file_perms;
+allow n7100_audio audio_device:dir r_dir_perms;
+allow n7100_audio audio_device:chr_file rw_file_perms;
+allow n7100_audio kmsg_device:chr_file w_file_perms;

@@ -1,0 +1,15 @@
+16a12d605c54f0225c754f536841338ef0aab32b  prebuilt/firmware/brcm/BCM4334B0.hcd
+35076468f51e24e70a58871396d59cfeb204ae54  prebuilt/firmware/brcm/brcmfmac4334-sdio.bin
+1e0c1073d253a8f97a3fd979dec84076f6ee64c4  prebuilt/firmware/brcm/brcmfmac4334-sdio.samsung,n7100.txt
+9f842ed2eb0a9dd9c5043fa515f4354a3e7f68de  prebuilt/firmware/exynos4_fimc_is_fw.bin
+25c3e1692506f6ecf00a16e00cf3fcc98ab36c49  prebuilt/firmware/exynos4_s5k6a3_setfile.bin
+272bb3dcb971780be7e443b95c1a19d4187078ce  proprietary/bin/cbd
+81c5580dca78d24508190752dae337e65f865c7f  proprietary/bin/gpsd
+f44c0f6a28cf905c2511c61ba69eac70a11e1624  proprietary/etc/gps.cer
+f25425d004fe02251784528458f1b3a8106c6d11  proprietary/etc/gps.xml
+db8a658bba3c46994308ff98d210ebff154c6997  proprietary/lib/hw/gps.default.so
+7f711e903b388924c55269d9ebc0d10a8c7a1520  proprietary/lib/libexpat.so
+03821aba2e747d17c71857e97c18ec81244f0dee  proprietary/lib/libsec-ril.so
+4ab51ae1beff909318bf190b04b0cb68b62ba2cf  proprietary/lib/libsecnativefeature.so
+a7796de83109e1acdc26a11082323996fff004ab  proprietary/lib/libsqlite.so
+02ebd5f155b6d3bdaf093f56c7a834dc94e10a38  proprietary/lib/libstlport.so

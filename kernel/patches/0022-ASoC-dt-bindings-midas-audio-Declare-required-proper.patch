@@ -1,0 +1,69 @@
+From 775bea82735d99a3b72812bcc1636cea4f1a318c Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Tue, 16 Jul 2024 16:27:22 +0200
+Subject: [PATCH 22/89] ASoC: dt-bindings: midas-audio: Declare required
+ properties for GPIO jack det
+
+GPIO jack detection requires an IIO channel and the detection threshold
+to work. Explicitly declare the requirement in DT schema.
+
+Fixes: 0a590ecc672a ("ASoC: dt-bindings: samsung,midas-audio: Add GPIO-based headset jack detection")
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+Changes in v2:
+- Use anyOf instead of oneOf in headset-detect-gpios/headset-key-gpios
+  if: statement
+---
+ .../bindings/sound/samsung,midas-audio.yaml   | 29 +++++++++++++++++--
+ 1 file changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/sound/samsung,midas-audio.yaml b/Documentation/devicetree/bindings/sound/samsung,midas-audio.yaml
+index 69ddfd4af..5483421a6 100644
+--- a/Documentation/devicetree/bindings/sound/samsung,midas-audio.yaml
++++ b/Documentation/devicetree/bindings/sound/samsung,midas-audio.yaml
+@@ -9,9 +9,6 @@ title: Samsung Midas audio complex with WM1811 codec
+ maintainers:
+   - Sylwester Nawrocki <s.nawrocki@samsung.com>
+ 
+-allOf:
+-  - $ref: sound-card-common.yaml#
+-
+ properties:
+   compatible:
+     const: samsung,midas-audio
+@@ -102,6 +99,32 @@ required:
+   - mic-bias-supply
+   - submic-bias-supply
+ 
++allOf:
++  - $ref: sound-card-common.yaml#
++
++  - if:
++      anyOf:
++        - required: [ headset-detect-gpios ]
++        - required: [ headset-key-gpios ]
++    then:
++      required:
++        - io-channels
++        - io-channel-names
++
++  - if:
++      required:
++        - headset-detect-gpios
++    then:
++      required:
++        - samsung,headset-4pole-threshold-microvolt
++
++  - if:
++      required:
++        - headset-key-gpios
++    then:
++      required:
++        - samsung,headset-button-threshold-microvolt
++
+ unevaluatedProperties: false
+ 
+ examples:
+-- 
+2.53.0
+

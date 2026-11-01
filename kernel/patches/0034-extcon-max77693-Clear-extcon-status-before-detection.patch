@@ -1,0 +1,76 @@
+From e5e9266038e870fdecb8f0203ea028e00d30b1e5 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Sun, 5 May 2024 21:45:53 +0200
+Subject: [PATCH 34/89] extcon: max77693: Clear extcon status before detection
+
+The way this is done currently is very subtly broken when switching
+from one cable type to another - there is a "disconnected" check
+which seems to work for the charger check, but is broken for ADC.
+Even if it wasn't, the driver never clears the previous cable type,
+instead disconnecting the currently detected one. This is a whole
+mess that would require a more extensive investigation to figure
+out, but for now, this lets us swap between OTG and charger cables
+without it locking up on the OTG cable.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ drivers/extcon/extcon-max77693.c | 28 +++++++++++++++++++++++++---
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/extcon/extcon-max77693.c b/drivers/extcon/extcon-max77693.c
+index 104286229..da1407409 100644
+--- a/drivers/extcon/extcon-max77693.c
++++ b/drivers/extcon/extcon-max77693.c
+@@ -937,8 +937,9 @@ static void max77693_muic_irq_work(struct work_struct *work)
+ {
+ 	struct max77693_muic_info *info = container_of(work,
+ 			struct max77693_muic_info, irq_work);
++	unsigned int cable_type;
+ 	int ret = 0;
+-	int adc;
++	int adc, i;
+ 
+ 	if (!info->edev)
+ 		return;
+@@ -949,8 +950,28 @@ static void max77693_muic_irq_work(struct work_struct *work)
+ 			MAX77693_MUIC_REG_STATUS1, info->status, 2);
+ 	if (ret) {
+ 		dev_err(info->dev, "failed to read MUIC register\n");
+-		mutex_unlock(&info->mutex);
+-		return;
++		goto out;
++	}
++
++	/*
++	 * Clear currently reported status (starting from the end,
++	 * so that EXTCON_USB is cleared last)
++	 */
++	for (i = (ARRAY_SIZE(max77693_extcon_cable) - 1); i >= 0; i--) {
++		cable_type = max77693_extcon_cable[i];
++		if (cable_type == EXTCON_NONE)
++			continue;
++
++		if (extcon_get_state(info->edev, cable_type)) {
++			ret = extcon_set_state_sync(info->edev, cable_type,
++						    false);
++			if (ret) {
++				dev_err(info->dev,
++					"failed to clear extcon cable type %d status: %d\n",
++					cable_type, ret);
++				goto out;
++			}
++		}
+ 	}
+ 
+ 	adc = info->status[0] & MAX77693_STATUS1_ADC_MASK;
+@@ -964,6 +985,7 @@ static void max77693_muic_irq_work(struct work_struct *work)
+ 	if (ret < 0)
+ 		dev_err(info->dev, "failed to handle MUIC interrupt\n");
+ 
++out:
+ 	mutex_unlock(&info->mutex);
+ }
+ 
+-- 
+2.53.0
+

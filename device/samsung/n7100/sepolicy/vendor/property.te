@@ -1,0 +1,4 @@
+vendor_restricted_prop(vendor_wifi_version_prop)
+# Mesa's debug options (vendor.mesa.*), looked up in every process that renders with GL
+vendor_public_prop(vendor_mesa_prop)
+get_prop(domain, vendor_mesa_prop)

@@ -1,0 +1,42 @@
+From 35e72bb04d9d9e2c7e8cee6b257a58684e7e2780 Mon Sep 17 00:00:00 2001
+From: Henrik Grimler <henrik@grimler.se>
+Date: Sun, 10 Aug 2025 20:55:12 +0200
+Subject: [PATCH 62/89] HACK: extcon: max8997: identify 619 kOhm jig as uart
+
+max8997 identifies a 619 kOhm debug cable as an audio dock, while most
+other samsung devices identifies it as a uart jig. This causes uart
+output to stop as muic is probed. For max8997 it seems to be required
+to use a 523 kOhm jig instead.
+
+I do not have any dock, and do not have the parts to make a new cable
+with 523 kOhm, so hack driver to identify a 619 kOhm device as an uart
+jig as well.
+---
+ drivers/extcon/extcon-max8997.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/extcon/extcon-max8997.c b/drivers/extcon/extcon-max8997.c
+index 9cddf08e0..cc9fc509b 100644
+--- a/drivers/extcon/extcon-max8997.c
++++ b/drivers/extcon/extcon-max8997.c
+@@ -338,7 +338,7 @@ static int max8997_muic_handle_usb(struct max8997_muic_info *info,
+ 	return 0;
+ }
+ 
+-static int max8997_muic_handle_dock(struct max8997_muic_info *info,
++static int __maybe_unused max8997_muic_handle_dock(struct max8997_muic_info *info,
+ 			int cable_type, bool attached)
+ {
+ 	int ret = 0;
+@@ -408,7 +408,7 @@ static int max8997_muic_adc_handler(struct max8997_muic_info *info)
+ 		break;
+ 	case MAX8997_MUIC_ADC_AV_CABLE_NOLOAD:
+ 	case MAX8997_MUIC_ADC_FACTORY_MODE_UART_ON:
+-		ret = max8997_muic_handle_dock(info, cable_type, attached);
++		ret = max8997_muic_handle_jig_uart(info, attached);
+ 		if (ret < 0)
+ 			return ret;
+ 		break;
+-- 
+2.53.0
+

@@ -1,0 +1,44 @@
+From 04664b4a2d5abd7e8cd9c2d2b9e1c8c36c94a2df Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Sat, 20 Jul 2024 09:19:50 +0200
+Subject: [PATCH 32/89] ARM: dts: samsung: exynos4212-tab3: Enable EHCI/OHCI
+ nodes
+
+Now that we have USB mode switching implemented and enabling these
+nodes won't break peripheral mode, enable the EHCI/OHCI nodes to
+allow for USB OTG.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 553b1734c..95e0312a6 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -442,6 +442,10 @@ panel@0 {
+ 	};
+ };
+ 
++&ehci {
++	status = "okay";
++};
++
+ &exynos_usbphy {
+ 	vbus-supply = <&esafeout1_reg>;
+ 	samsung,usb-connector = <&usb_conn>;
+@@ -836,6 +840,10 @@ &mshc_0 {
+ 	status = "okay";
+ };
+ 
++&ohci {
++	status = "okay";
++};
++
+ &pinctrl_0 {
+ 	pinctrl-names = "default";
+ 	pinctrl-0 = <&sleep0>;
+-- 
+2.53.0
+

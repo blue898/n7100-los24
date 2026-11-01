@@ -1,0 +1,33 @@
+From 60a5919599c19836a721d3ba0603b6159c38cabd Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Tue, 30 Jul 2024 17:36:35 +0200
+Subject: [PATCH 53/89] ARM: dts: samsung: exynos4412-midas: Drop CHARGER
+ regulator
+
+We don't use it for managing charging, and it interferes with the
+extcon-based charging mode switching.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4412-midas.dtsi | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+index 9f8ed715a..6a6bf5f3b 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+@@ -223,11 +223,6 @@ esafeout1_reg: ESAFEOUT1 {
+ 				esafeout2_reg: ESAFEOUT2 {
+ 					regulator-name = "ESAFEOUT2";
+ 				};
+-				charger_reg: CHARGER {
+-					regulator-name = "CHARGER";
+-					regulator-min-microamp = <60000>;
+-					regulator-max-microamp = <2580000>;
+-				};
+ 			};
+ 
+ 			motor-driver {
+-- 
+2.53.0
+

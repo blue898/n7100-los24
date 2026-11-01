@@ -1,0 +1,30 @@
+From ad22a60f3c9569bf160d7dbcd4c991f2977d08f9 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Thu, 18 Jul 2024 23:21:57 +0200
+Subject: [PATCH 47/89] ARM: dts: samsung: exynos4212-tab3: Use correct keycode
+ for home key
+
+KEY_HOME is for the "Home" key on a standard keyboard. Use KEY_HOMEPAGE
+which is what this button actually does on this device.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 0f06aa946..36d020364 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -99,7 +99,7 @@ key-down {
+ 
+ 		key-home {
+ 			gpios = <&gpx1 2 GPIO_ACTIVE_LOW>;
+-			linux,code = <KEY_HOME>;
++			linux,code = <KEY_HOMEPAGE>;
+ 			label = "home";
+ 			debounce-interval = <10>;
+ 			wakeup-source;
+-- 
+2.53.0
+

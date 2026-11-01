@@ -1,0 +1,43 @@
+From 81dd11940e6e99acb1994c7c597607c4e8a720e9 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Wed, 19 Jun 2024 15:15:23 +0200
+Subject: [PATCH 28/89] phy: samsung: exynos4210-usb2: Drop mode switch defines
+
+These are not used in the driver, and do not seem to be actually
+present in hardware. Drop them.
+
+Also drop "has_mode_switch = 0", it's already the default.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ drivers/phy/samsung/phy-exynos4210-usb2.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/drivers/phy/samsung/phy-exynos4210-usb2.c b/drivers/phy/samsung/phy-exynos4210-usb2.c
+index 3898a7f58..49c88fe8d 100644
+--- a/drivers/phy/samsung/phy-exynos4210-usb2.c
++++ b/drivers/phy/samsung/phy-exynos4210-usb2.c
+@@ -84,12 +84,6 @@
+ #define EXYNOS_4210_UPHY1CON			0x34
+ #define EXYNOS_4210_UPHY1CON_FLOAT_PREVENTION	0x1
+ 
+-/* Mode switching SUB Device <-> Host */
+-#define EXYNOS_4210_MODE_SWITCH_OFFSET		0x21c
+-#define EXYNOS_4210_MODE_SWITCH_MASK		1
+-#define EXYNOS_4210_MODE_SWITCH_DEVICE		0
+-#define EXYNOS_4210_MODE_SWITCH_HOST		1
+-
+ enum exynos4210_phy_id {
+ 	EXYNOS4210_DEVICE,
+ 	EXYNOS4210_HOST,
+@@ -250,7 +244,6 @@ static const struct samsung_usb2_common_phy exynos4210_phys[] = {
+ };
+ 
+ const struct samsung_usb2_phy_config exynos4210_usb2_phy_config = {
+-	.has_mode_switch	= 0,
+ 	.num_phys		= EXYNOS4210_NUM_PHYS,
+ 	.phys			= exynos4210_phys,
+ 	.rate_to_clk		= exynos4210_rate_to_clk,
+-- 
+2.53.0
+

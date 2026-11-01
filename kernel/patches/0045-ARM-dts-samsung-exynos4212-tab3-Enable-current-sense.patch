@@ -1,0 +1,32 @@
+From ebd1ab65936743e10782b60ef057e917f0920218 Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Thu, 18 Jul 2024 23:18:24 +0200
+Subject: [PATCH 45/89] ARM: dts: samsung: exynos4212-tab3: Enable current
+ sense in fuel gauge
+
+According to schematics, the fuelgauge on this device is wired up for
+current sensing.
+
+Add the maxim,rsns-microohm property necessary to enable current
+sensing functionality.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 1d1c3e802..e64646182 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -192,6 +192,7 @@ fuel-gauge@36 {
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&max77693_fuel_irq>;
+ 
++			maxim,rsns-microohm = <10000>;
+ 			maxim,over-heat-temp = <500>;
+ 			maxim,over-volt = <4500>;
+ 		};
+-- 
+2.53.0
+

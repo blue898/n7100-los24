@@ -1,0 +1,5 @@
+# V4L2 capture nodes and the subdevices of the exynos4-is media pipeline
+allow hal_camera_default video_device:dir r_dir_perms;
+allow hal_camera_default video_device:chr_file rw_file_perms;
+r_dir_file(hal_camera_default, sysfs_video4linux)
+allow hal_camera_default sysfs:dir r_dir_perms;

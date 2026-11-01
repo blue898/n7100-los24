@@ -1,0 +1,39 @@
+From e43f4753d605d63e7044e7ca644845f7b028d2ab Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 09:50:52 +0100
+Subject: [PATCH 83/89] ARM: dts: exynos4412-n710x: reserve ramoops at
+ 0x46000000 (sboot sec_log area)
+
+---
+ arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+index 6bb1b1bc1..604a3fc4c 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-n710x.dtsi
+@@ -10,6 +10,21 @@ memory@40000000 {
+ 		reg = <0x40000000 0x7fc00000>;
+ 	};
+ 
++	reserved-memory {
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
++
++		/* S-Boot's sec_log area, kept across warm resets: pstore/ramoops for post-mortem logs */
++		ramoops@46000000 {
++			compatible = "ramoops";
++			reg = <0x46000000 0x200000>;
++			record-size = <0x40000>;
++			console-size = <0x80000>;
++			pmsg-size = <0x80000>;
++		};
++	};
++
+ 	/* bootargs are passed in by bootloader */
+ 
+ 	cam_vdda_reg: voltage-regulator-10 {
+-- 
+2.53.0
+

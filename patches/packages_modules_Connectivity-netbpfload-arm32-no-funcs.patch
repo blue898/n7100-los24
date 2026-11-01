@@ -1,0 +1,13 @@
+--- a/bpf/loader/NetBpfLoad.cpp
++++ b/bpf/loader/NetBpfLoad.cpp
+@@ -1352,7 +1352,9 @@
+ static bool loadAllObjects() {
+     // Enable on kernels that have the BPF CFI backports, see: b/488034908
+     // b/494690861: funcs may trigger Real-time Kernel Protection (RKP)
+-    bool funcs = isAtLeast26Q2 && isAtLeastKernelVersion(6, 6, 118);
++    // n7100: the ARM32 JIT can't do bpf-to-bpf calls or callbacks (and the interpreter refuses
++    // callbacks), so 32-bit kernels load the flat, pre-26Q2 variants
++    bool funcs = isAtLeast26Q2 && isAtLeastKernelVersion(6, 6, 118) && !isKernel32Bit();
+ 
+     if (!loadObject(BPFROOT "offload.o", /*libbpf*/false)) return false;
+     if (!loadObject(BPFROOT "test.o")) return false;

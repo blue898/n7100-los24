@@ -1,0 +1,24 @@
+From ec1136ca6a64d589efd2880824137320693e0ad7 Mon Sep 17 00:00:00 2001
+From: Henrik Grimler <henrik@grimler.se>
+Date: Tue, 1 Apr 2025 13:35:49 +0200
+Subject: [PATCH 60/89] phy: samsung: fix compilation error if extcon is module
+
+---
+ drivers/phy/samsung/Kconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/phy/samsung/Kconfig b/drivers/phy/samsung/Kconfig
+index b7ab40290..f19239fed 100644
+--- a/drivers/phy/samsung/Kconfig
++++ b/drivers/phy/samsung/Kconfig
+@@ -43,6 +43,7 @@ config PHY_SAMSUNG_USB2
+ 	tristate "S5P/Exynos SoC series USB 2.0 PHY driver"
+ 	depends on HAS_IOMEM
+ 	depends on USB_EHCI_EXYNOS || USB_OHCI_EXYNOS || USB_DWC2 || COMPILE_TEST
++	depends on EXTCON || !EXTCON # if EXTCON=m, this cannot be built-in
+ 	select GENERIC_PHY
+ 	select MFD_SYSCON
+ 	default ARCH_EXYNOS
+-- 
+2.53.0
+

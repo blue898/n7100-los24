@@ -1,0 +1,173 @@
+From 33ab2103f8af553646b23ebbe734d896f84f785d Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Fri, 19 Jul 2024 23:28:31 +0200
+Subject: [PATCH 30/89] phy: samsung-usb2: Add extcon support for handling mode
+ switch
+
+The Exynos 4x12 and 5250/5420 have a "mode switch" register which is
+used to toggle between "device" and "host" modes. This seems to be
+necessary to get the "hsotg" or host mode (EHCI/OHCI) to work.
+
+This switch is toggled in the driver while powering on/off the PHYs.
+Add the ability to override this toggle by monitoring the status of
+an extcon device port representing a USB connector. If a cable of type
+EXTCON_USB_HOST is plugged in, it switches to host mode, otherwise it
+switches to device mode. (This is because the hsotg controller is more
+sensitive to the mode being set to "host" than the EHCI controller
+is to the mode being set to "device".)
+
+This mechanism is completely optional, so it shouldn't break existing
+devices.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ drivers/phy/samsung/phy-exynos4x12-usb2.c |  8 ++--
+ drivers/phy/samsung/phy-exynos5250-usb2.c |  4 +-
+ drivers/phy/samsung/phy-samsung-usb2.c    | 55 +++++++++++++++++++++++
+ drivers/phy/samsung/phy-samsung-usb2.h    |  2 +
+ 4 files changed, 65 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/phy/samsung/phy-exynos4x12-usb2.c b/drivers/phy/samsung/phy-exynos4x12-usb2.c
+index 89ee1d26c..f2092e59e 100644
+--- a/drivers/phy/samsung/phy-exynos4x12-usb2.c
++++ b/drivers/phy/samsung/phy-exynos4x12-usb2.c
+@@ -298,11 +298,13 @@ static int exynos4x12_power_on(struct samsung_usb2_phy_instance *inst)
+ 		return 0;
+ 
+ 	if (inst->cfg->id == EXYNOS4x12_HOST) {
+-		exynos4x12_set_mode_switch(drv, EXYNOS_MODE_SWITCH_HOST);
++		if (!drv->extcon)
++			exynos4x12_set_mode_switch(drv,
++						   EXYNOS_MODE_SWITCH_HOST);
+ 		exynos4x12_power_on_int(&drv->instances[EXYNOS4x12_DEVICE]);
+ 	}
+ 
+-	if (inst->cfg->id == EXYNOS4x12_DEVICE)
++	if (inst->cfg->id == EXYNOS4x12_DEVICE && !drv->extcon)
+ 		exynos4x12_set_mode_switch(drv, EXYNOS_MODE_SWITCH_DEVICE);
+ 
+ 	if (inst->cfg->id == EXYNOS4x12_HSIC0 ||
+@@ -332,7 +334,7 @@ static int exynos4x12_power_off(struct samsung_usb2_phy_instance *inst)
+ 	if (inst->ext_cnt-- > 1)
+ 		return 0;
+ 
+-	if (inst->cfg->id == EXYNOS4x12_DEVICE)
++	if (inst->cfg->id == EXYNOS4x12_DEVICE && !drv->extcon)
+ 		exynos4x12_set_mode_switch(drv, EXYNOS_MODE_SWITCH_HOST);
+ 
+ 	if (inst->cfg->id == EXYNOS4x12_HOST)
+diff --git a/drivers/phy/samsung/phy-exynos5250-usb2.c b/drivers/phy/samsung/phy-exynos5250-usb2.c
+index e4c2c9112..87638c433 100644
+--- a/drivers/phy/samsung/phy-exynos5250-usb2.c
++++ b/drivers/phy/samsung/phy-exynos5250-usb2.c
+@@ -226,7 +226,9 @@ static int exynos5250_power_on(struct samsung_usb2_phy_instance *inst)
+ 
+ 	switch (inst->cfg->id) {
+ 	case EXYNOS5250_DEVICE:
+-		exynos5250_set_mode_switch(drv, EXYNOS_MODE_SWITCH_DEVICE);
++		if (!drv->extcon)
++			exynos5250_set_mode_switch(drv,
++						   EXYNOS_MODE_SWITCH_DEVICE);
+ 
+ 		/* OTG configuration */
+ 		otg = readl(drv->reg_phy + EXYNOS_5250_USBOTGSYS);
+diff --git a/drivers/phy/samsung/phy-samsung-usb2.c b/drivers/phy/samsung/phy-samsung-usb2.c
+index d2749b67c..1d70426c7 100644
+--- a/drivers/phy/samsung/phy-samsung-usb2.c
++++ b/drivers/phy/samsung/phy-samsung-usb2.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include <linux/clk.h>
++#include <linux/extcon.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -140,10 +141,33 @@ static const struct of_device_id samsung_usb2_phy_of_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, samsung_usb2_phy_of_match);
+ 
++static int
++samsung_usb2_phy_extcon_notify(struct notifier_block *nb, unsigned long event,
++			      void *ptr)
++{
++	struct samsung_usb2_phy_driver *drv;
++	enum samsung_usb2_mode_switch mode;
++
++	drv = container_of(nb, struct samsung_usb2_phy_driver, extcon_notify);
++
++	if (!drv->cfg->has_mode_switch)
++		return -EINVAL;
++
++	if (event)
++		/* Host mode on */
++		mode = EXYNOS_MODE_SWITCH_HOST;
++	else
++		/* Host mode off */
++		mode = EXYNOS_MODE_SWITCH_DEVICE;
++
++	return drv->cfg->set_mode_switch(drv, mode);
++}
++
+ static int samsung_usb2_phy_probe(struct platform_device *pdev)
+ {
+ 	const struct samsung_usb2_phy_config *cfg;
+ 	struct device *dev = &pdev->dev;
++	struct device_node *extcon_conn, *extcon_edev;
+ 	struct phy_provider *phy_provider;
+ 	struct samsung_usb2_phy_driver *drv;
+ 	int i, ret;
+@@ -188,6 +212,37 @@ static int samsung_usb2_phy_probe(struct platform_device *pdev)
+ 			dev_err(dev, "Failed to map system registers (via syscon)\n");
+ 			return PTR_ERR(drv->reg_sys);
+ 		}
++
++		if (of_find_property(pdev->dev.of_node,
++				     "samsung,usb-connector", NULL)) {
++			extcon_conn = of_parse_phandle(pdev->dev.of_node,
++						"samsung,usb-connector", 0);
++			extcon_edev = of_get_parent(extcon_conn);
++
++			drv->extcon = extcon_find_edev_by_node(extcon_edev);
++			if (IS_ERR(drv->extcon)) {
++				if (PTR_ERR(drv->extcon) == -ENODEV) {
++					drv->extcon = NULL;
++				} else {
++					return dev_err_probe(dev,
++						PTR_ERR(drv->extcon),
++						"Failed to get extcon device\n");
++				}
++			} else {
++				drv->extcon_notify.notifier_call = \
++					samsung_usb2_phy_extcon_notify;
++
++				ret = devm_extcon_register_notifier(dev,
++							drv->extcon,
++							EXTCON_USB_HOST,
++							&drv->extcon_notify);
++				if (ret) {
++					dev_err(dev,
++						"Failed to register extcon notifier\n");
++					return ret;
++				}
++			}
++		}
+ 	}
+ 
+ 	drv->clk = devm_clk_get(dev, "phy");
+diff --git a/drivers/phy/samsung/phy-samsung-usb2.h b/drivers/phy/samsung/phy-samsung-usb2.h
+index a1216a627..affe56ba9 100644
+--- a/drivers/phy/samsung/phy-samsung-usb2.h
++++ b/drivers/phy/samsung/phy-samsung-usb2.h
+@@ -47,6 +47,8 @@ struct samsung_usb2_phy_driver {
+ 	void __iomem *reg_phy;
+ 	struct regmap *reg_pmu;
+ 	struct regmap *reg_sys;
++	struct extcon_dev *extcon;
++	struct notifier_block extcon_notify;
+ 	spinlock_t lock;
+ 	struct samsung_usb2_phy_instance instances[];
+ };
+-- 
+2.53.0
+

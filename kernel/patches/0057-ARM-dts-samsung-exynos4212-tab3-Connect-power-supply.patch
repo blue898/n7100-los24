@@ -1,0 +1,38 @@
+From 6531da1ab95e9ea9582b009b56bd50b538ae3dcd Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Wed, 14 Aug 2024 16:01:58 +0200
+Subject: [PATCH 57/89] ARM: dts: samsung: exynos4212-tab3: Connect power
+ supply node to fuel gauge
+
+This allows us to read the battery status property.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index fe857a84c..be4db2298 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -162,7 +162,7 @@ usb_conn: connector {
+ 				};
+ 			};
+ 
+-			charger {
++			max77693_charger: charger {
+ 				compatible = "maxim,max77693-charger";
+ 				monitored-battery = <&battery>;
+ 
+@@ -193,6 +193,8 @@ fuel-gauge@36 {
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&max77693_fuel_irq>;
+ 
++			power-supplies = <&max77693_charger>;
++
+ 			maxim,rsns-microohm = <10000>;
+ 			maxim,over-heat-temp = <500>;
+ 			maxim,over-volt = <4500>;
+-- 
+2.53.0
+

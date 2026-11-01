@@ -1,0 +1,37 @@
+From 2436ee37113fed2ef3692d15c9f847f87b3291cc Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Mon, 27 May 2024 19:23:47 +0200
+Subject: [PATCH 36/89] dt-bindings: power: supply: max77693: Add
+ maxim,usb-connector property
+
+Allow for specifying a USB connector to use for charger type/OTG cable
+detection.
+
+The way this is done is inspired by the rt5033-charger implementation.
+
+Reviewed-by: Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ .../devicetree/bindings/power/supply/maxim,max77693.yaml    | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml b/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml
+index 2f4437daf..b70c171bd 100644
+--- a/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml
++++ b/Documentation/devicetree/bindings/power/supply/maxim,max77693.yaml
+@@ -73,6 +73,12 @@ properties:
+     enum: [4300000, 4700000, 4800000, 4900000]
+     default: 4300000
+ 
++  maxim,usb-connector:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description:
++      USB connector to use for charger type/OTG cable detection. Phandle
++      to a USB connector according to usb-connector.yaml.
++
+ required:
+   - compatible
+ 
+-- 
+2.53.0
+

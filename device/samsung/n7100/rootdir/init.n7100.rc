@@ -1,0 +1,59 @@
+import /vendor/etc/init/hw/init.n7100.usb.rc
+
+on early-init
+    # hard hang -> SoC reset (Android 16 has no watchdogd anymore)
+    start n7100_watchdog
+    # netfilter, zram, filesystem and Wi-Fi modules (nothing autoloads them)
+    exec_start n7100_modules
+
+on fs
+    mount_all /vendor/etc/fstab.${ro.hardware}
+    # Samsung formatted EFS long before these labels; IMEI and modem NV data live there
+    restorecon_recursive /efs
+    # lz4 (de)compresses about twice as fast as lzo-rle on the A9s at a similar ratio
+    write /sys/block/zram0/comp_algorithm lz4
+    swapon_all /vendor/etc/fstab.${ro.hardware}
+
+on post-fs-data
+    mkdir /data/vendor/wifi 0771 wifi wifi
+    # Samsung RIL state (its /data/misc/radio, see proprietary/README)
+    mkdir /data/vendor/ril 0770 radio radio
+    mkdir /data/vendor/wifi/wpa 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa/sockets 0770 wifi wifi
+
+on boot
+    exec_start n7100_audio
+
+# Development: no system suspend. In deep sleep the dwc2 gadget drops off the bus, so USB adb
+# vanishes until something wakes the phone (setprop persist.vendor.n7100.stay_awake 1, on by
+# default in development builds: init.n7100.dev.rc)
+on property:persist.vendor.n7100.stay_awake=1
+    write /sys/power/wake_lock n7100-stay-awake
+
+on property:persist.vendor.n7100.stay_awake=0
+    write /sys/power/wake_unlock n7100-stay-awake
+
+# the Exynos 4412 watchdog tops out at ~21 s
+service n7100_watchdog /vendor/bin/n7100tool watchdog 20 5
+    user root
+    group root
+    disabled
+
+service n7100_modules /vendor/bin/n7100-modules.sh
+    user root
+    group root
+    disabled
+    oneshot
+
+# XMM6262 boot daemon (Samsung, static): loads PSI/EBL/firmware from RADIO and the NV
+# data from /efs over /dev/umts_boot0, then watches the modem and reboots it on a crash
+service vendor.cpboot-daemon /vendor/bin/cbd -d -p 10
+    class main
+    user root
+    group radio cache inet misc audio log
+
+service n7100_audio /vendor/bin/n7100-audio.sh
+    user root
+    group root audio
+    disabled
+    oneshot

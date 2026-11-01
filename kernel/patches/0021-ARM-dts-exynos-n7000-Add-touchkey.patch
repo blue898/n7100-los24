@@ -1,0 +1,62 @@
+From 5481ba46ef863bc35d687dd2b9e9a986c399eaaf Mon Sep 17 00:00:00 2001
+From: Raymond Hackley <raymondhackley@protonmail.com>
+Date: Wed, 4 Oct 2023 18:58:39 +0000
+Subject: [PATCH 21/89] ARM: dts: exynos: n7000: Add touchkey
+
+Signed-off-by: Raymond Hackley <raymondhackley@protonmail.com>
+---
+ .../arm/boot/dts/samsung/exynos4210-n7000.dts | 31 +++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4210-n7000.dts b/arch/arm/boot/dts/samsung/exynos4210-n7000.dts
+index d0a5c9884..f4d9d840c 100644
+--- a/arch/arm/boot/dts/samsung/exynos4210-n7000.dts
++++ b/arch/arm/boot/dts/samsung/exynos4210-n7000.dts
+@@ -108,6 +108,32 @@ battery@36 {
+ 		};
+ 	};
+ 
++	i2c-tkey {
++		compatible = "i2c-gpio";
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		sda-gpios = <&gpk1 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		scl-gpios = <&gpk1 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		i2c-gpio,delay-us = <5>;
++
++		touchkey@20 {
++			compatible = "cypress,q1-touchkey";
++			reg = <0x20>;
++
++			interrupt-parent = <&gpl0>;
++			interrupts = <5 IRQ_TYPE_EDGE_FALLING>;
++
++			vcc-supply = <&vtouch_reg>;
++			vdd-supply = <&vtouchled_reg>;
++
++			linux,keycodes = <KEY_APPSELECT KEY_BACK>;
++
++			pinctrl-0 = <&tkey_int>;
++			pinctrl-names = "default";
++		};
++	};
++
+ 	lcd_vcc_22v_reg: regulator-lcd-vcc-22v {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "LCD_2.2V";
+@@ -638,6 +664,11 @@ max17042_fuel_irq: max17042-fuel-irq-pins {
+ 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+ 	};
+ 
++	tkey_int: tkey-int-pins {
++		samsung,pins = "gpl0-5";
++		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
++	};
++
+ 	tsp540e_irq: tsp540e-irq-pins {
+ 		samsung,pins = "gpx0-4";
+ 		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+-- 
+2.53.0
+

@@ -1,0 +1,30 @@
+From b71bb27797c5e074c084c8487d007f6179e65c0d Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Sat, 20 Jul 2024 08:57:56 +0200
+Subject: [PATCH 31/89] ARM: dts: samsung: exynos4212-tab3: Connect USB
+ connector to PHY mode switch
+
+Add the samsung,usb-connector property to the USB PHY node and connect
+the USB connector port to it. This is done to get automatic USB mode
+switching, which allows us to use USB OTG.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 9a50e9bfb..553b1734c 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -444,6 +444,7 @@ panel@0 {
+ 
+ &exynos_usbphy {
+ 	vbus-supply = <&esafeout1_reg>;
++	samsung,usb-connector = <&usb_conn>;
+ 	status = "okay";
+ };
+ 
+-- 
+2.53.0
+

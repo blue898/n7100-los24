@@ -1,0 +1,9 @@
+type sensors_vendor_data_file, file_type, data_file_type;
+type sysfs_ssp, sysfs_type, fs_type;
+type sysfs_video4linux, sysfs_type, fs_type;
+type gps_vendor_data_file, file_type, data_file_type;
+type ril_vendor_data_file, file_type, data_file_type;
+# GPS_PWR_EN (a GPIO LED), the modem's USB host power switch, GPU/bus devfreq knobs
+type sysfs_gps, sysfs_type, fs_type;
+type sysfs_modem, sysfs_type, fs_type;
+type sysfs_devfreq_n7100, sysfs_type, fs_type;

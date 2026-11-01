@@ -1,0 +1,18 @@
+# gpsd: Broadcom's daemon for the BCM4752 (UART1, power through a GPIO LED); the GNSS HAL
+# talks to it through pipes in /data/vendor/gps. It fetches LTO orbit data from the net.
+type gpsd, domain;
+type gpsd_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(gpsd)
+net_domain(gpsd)
+wakelock_use(gpsd)
+
+allow gpsd gnss_device:chr_file rw_file_perms;
+r_dir_file(gpsd, sysfs_gps)
+allow gpsd sysfs_gps:file w_file_perms;
+allow gpsd gps_vendor_data_file:dir create_dir_perms;
+allow gpsd gps_vendor_data_file:{ file fifo_file } create_file_perms;
+allow gpsd proc_cpuinfo:file r_file_perms;
+
+# its debug log header runs getprop through the system shell: not for a vendor daemon
+dontaudit gpsd shell_exec:file rx_file_perms;
+dontaudit gpsd system_file:file rx_file_perms;

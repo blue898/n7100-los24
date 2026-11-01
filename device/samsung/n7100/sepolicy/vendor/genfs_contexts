@@ -1,0 +1,8 @@
+# V4L2 nodes, labelled as they appear: the camera HAL enumerates them at start, before ueventd
+# could restorecon them (file_contexts)
+genfscon sysfs /devices/platform/soc/10800000.g2d/video4linux                           u:object_r:sysfs_video4linux:s0
+genfscon sysfs /devices/platform/soc/11840000.jpeg-codec/video4linux                    u:object_r:sysfs_video4linux:s0
+genfscon sysfs /devices/platform/soc/13400000.codec/video4linux                         u:object_r:sysfs_video4linux:s0
+genfscon sysfs /devices/platform/soc/13860000.i2c/i2c-0/0-003c/video4linux              u:object_r:sysfs_video4linux:s0
+genfscon sysfs /devices/platform/soc/soc:camera@11800000/video4linux                    u:object_r:sysfs_video4linux:s0
+genfscon sysfs /devices/platform/soc/soc:camera@11800000/12000000.fimc-is/12140000.i2c-isp/i2c-16/16-0010/video4linux u:object_r:sysfs_video4linux:s0

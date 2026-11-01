@@ -1,0 +1,32 @@
+From 4f9ba124b4db1f71cb2f019834709e49e848a977 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Sat, 31 Oct 2026 11:20:40 +0100
+Subject: [PATCH 85/89] ARM: decompressor: don't inline merge_fdt_bootargs()
+
+Its 1 KiB command line buffer pushes atags_to_fdt() over the hard 1280 byte
+frame limit when clang inlines it (ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND).
+---
+ arch/arm/boot/compressed/atags_to_fdt.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/compressed/atags_to_fdt.c b/arch/arm/boot/compressed/atags_to_fdt.c
+index 627752f18..efee83b06 100644
+--- a/arch/arm/boot/compressed/atags_to_fdt.c
++++ b/arch/arm/boot/compressed/atags_to_fdt.c
+@@ -70,7 +70,12 @@ static uint32_t get_cell_size(const void *fdt)
+ 	return cell_size;
+ }
+ 
+-static void merge_fdt_bootargs(void *fdt, const char *fdt_cmdline)
++/*
++ * Keep the 1 KiB command line buffer out of atags_to_fdt()'s frame: clang inlines
++ * this and trips the hard -Wframe-larger-than=1280 the Makefile sets for this file
++ * (CONFIG_ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND).
++ */
++static noinline void merge_fdt_bootargs(void *fdt, const char *fdt_cmdline)
+ {
+ 	char cmdline[COMMAND_LINE_SIZE];
+ 	const char *fdt_bootargs;
+-- 
+2.53.0
+

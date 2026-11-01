@@ -1,0 +1,7 @@
+// Framework configuration for the Note II
+
+runtime_resource_overlay {
+    name: "FrameworksResN7100",
+    vendor: true,
+    sdk_version: "current",
+}

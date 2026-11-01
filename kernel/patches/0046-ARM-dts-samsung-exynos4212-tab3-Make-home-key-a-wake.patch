@@ -1,0 +1,29 @@
+From ca8ebb7cda7a7c855c73c5d03023508315b79a0a Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Thu, 18 Jul 2024 23:20:20 +0200
+Subject: [PATCH 46/89] ARM: dts: samsung: exynos4212-tab3: Make home key a
+ wakeup source
+
+Allow the home key to wake up the device. This matches downstream
+behavior.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index e64646182..0f06aa946 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -102,6 +102,7 @@ key-home {
+ 			linux,code = <KEY_HOME>;
+ 			label = "home";
+ 			debounce-interval = <10>;
++			wakeup-source;
+ 		};
+ 
+ 		switch-hall-sensor {
+-- 
+2.53.0
+

@@ -1,0 +1,9 @@
+service vendor.sensors-n7100 /vendor/bin/hw/android.hardware.sensors-service.n7100
+    class hal
+    user system
+    group system
+    rlimit rtprio 10 10
+
+on post-fs-data
+    # magnetometer hard-iron offsets
+    mkdir /data/vendor/sensors 0770 system system

@@ -1,0 +1,91 @@
+# Graphics: Mesa (lima + kmsro), drm_hwcomposer, minigbm
+/dev/dri                                                           u:object_r:gpu_device:s0
+/dev/dri/card[0-9]+                                                u:object_r:graphics_device:s0
+/dev/dri/renderD[0-9]+                                             u:object_r:gpu_device:s0
+/vendor/bin/hw/android\.hardware\.graphics\.allocator-service\.minigbm u:object_r:hal_graphics_allocator_default_exec:s0
+/vendor/bin/hw/android\.hardware\.composer\.hwc3-service\.drm      u:object_r:hal_graphics_composer_default_exec:s0
+/vendor/lib/hw/mapper\.minigbm\.so                                 u:object_r:same_process_hal_file:s0
+/vendor/lib/libminigbm_gralloc(4_utils)?\.so                       u:object_r:same_process_hal_file:s0
+/vendor/lib/libdrm\.so                                             u:object_r:same_process_hal_file:s0
+/vendor/lib/egl/lib(EGL|GLESv1_CM|GLESv2)_mesa\.so                 u:object_r:same_process_hal_file:s0
+/vendor/lib/libgallium_dri\.so                                     u:object_r:same_process_hal_file:s0
+/vendor/lib/libgbm_mesa\.so                                        u:object_r:same_process_hal_file:s0
+/vendor/lib/gbm(/.*)?                                              u:object_r:same_process_hal_file:s0
+/vendor/lib/libz\.so                                               u:object_r:same_process_hal_file:s0
+
+# Our HALs
+/vendor/bin/hw/android\.hardware\.sensors-service\.n7100           u:object_r:hal_sensors_default_exec:s0
+/vendor/bin/hw/android\.hardware\.camera\.provider-service\.n7100  u:object_r:hal_camera_default_exec:s0
+/vendor/bin/hw/android\.hardware\.lights-service\.n7100            u:object_r:hal_light_default_exec:s0
+/vendor/bin/hw/android\.hardware\.vibrator-service\.n7100          u:object_r:hal_vibrator_default_exec:s0
+
+# Sensor hub (samsung-ssp) and cameras (exynos4-is media pipeline)
+/dev/ssp_sensorhub                                                 u:object_r:ssp_device:s0
+/dev/video[0-9]+                                                   u:object_r:video_device:s0
+/dev/v4l-subdev[0-9]+                                              u:object_r:video_device:s0
+/dev/media[0-9]+                                                   u:object_r:video_device:s0
+/data/vendor/sensors(/.*)?                                         u:object_r:sensors_vendor_data_file:s0
+
+# Boot helpers
+/vendor/bin/n7100tool                                              u:object_r:n7100tool_exec:s0
+/vendor/bin/n7100-modules\.sh                                      u:object_r:n7100_modules_exec:s0
+/vendor/bin/n7100-audio\.sh                                        u:object_r:n7100_audio_exec:s0
+
+# Modem (XMM6262 over HSIC, kernel modem_if): cbd boots it, the radio HAL hosts Samsung's RIL
+/vendor/bin/cbd                                                    u:object_r:cbd_exec:s0
+/vendor/bin/hw/android\.hardware\.radio-service\.n7100             u:object_r:rild_exec:s0
+/dev/umts_.*                                                       u:object_r:radio_device:s0
+/dev/link_pm                                                       u:object_r:radio_device:s0
+/dev/multipdp                                                      u:object_r:radio_device:s0
+/dev/block/mmcblk0p10                                              u:object_r:modem_block_device:s0
+/data/vendor/ril(/.*)?                                             u:object_r:ril_vendor_data_file:s0
+
+# GPS (BCM4752 on UART1): Broadcom's gpsd, and the GNSS HAL around Samsung's legacy HAL
+/vendor/bin/gpsd                                                   u:object_r:gpsd_exec:s0
+/vendor/bin/hw/android\.hardware\.gnss-service\.n7100              u:object_r:hal_gnss_default_exec:s0
+/dev/ttySAC1                                                       u:object_r:gnss_device:s0
+/data/vendor/gps(/.*)?                                             u:object_r:gps_vendor_data_file:s0
+
+/vendor/bin/hw/android\.hardware\.power-service\.n7100             u:object_r:hal_power_default_exec:s0
+
+# Loaded into app processes through mapper.minigbm.so
+/vendor/lib/libui\.so                                              u:object_r:same_process_hal_file:s0
+/vendor/lib/android\.hardware\.graphics\.allocator@2\.0\.so        u:object_r:same_process_hal_file:s0
+
+# sysfs (ueventd restorecons /sys at coldboot and every device it adds)
+/sys/devices/platform/gps-leds/leds/gps-pwr-en(/.*)?               u:object_r:sysfs_gps:s0
+/sys/devices/platform/s5p-[eo]hci(/.*)?                            u:object_r:sysfs_modem:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0030/leds(/.*)? u:object_r:sysfs_leds:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0020/leds(/.*)? u:object_r:sysfs_leds:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0066/max77693-led/leds(/.*)? u:object_r:sysfs_leds:s0
+/sys/devices/platform/soc/11c80000\.dsi/11c80000\.dsi\.0/backlight(/.*)? u:object_r:sysfs_leds:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0036/power_supply(/.*)? u:object_r:sysfs_batteryinfo:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0066/max77693-charger/power_supply(/.*)? u:object_r:sysfs_batteryinfo:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0066/max77693-muic/extcon(/.*)? u:object_r:sysfs_extcon:s0
+/sys/devices/platform/soc/13000000\.gpu(/.*)?                      u:object_r:sysfs_gpu:s0
+/sys/devices/platform/soc/13000000\.gpu/devfreq(/.*)?              u:object_r:sysfs_devfreq_n7100:s0
+/sys/devices/platform/bus-[a-z0-9]+/devfreq(/.*)?                  u:object_r:sysfs_devfreq_n7100:s0
+/sys/devices/platform/soc/12480000\.usb/udc(/.*)?                  u:object_r:sysfs_udc:s0
+/sys/devices/.*/wakeup/wakeup[0-9]+(/.*)?                          u:object_r:sysfs_wakeup:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0036/power_supply/[^/]+/wakeup[0-9]+(/.*)? u:object_r:sysfs_wakeup:s0
+/sys/devices/platform/i2c-[0-9]+/i2c-[0-9]+/[0-9]+-0066/max77693-charger/power_supply/[^/]+/wakeup[0-9]+(/.*)? u:object_r:sysfs_wakeup:s0
+
+/vendor/bin/hw/android\.hardware\.security\.keymint-service\.nonsecure u:object_r:hal_keymint_default_exec:s0
+/vendor/lib/android\.hardware\.graphics\.allocator@3\.0\.so        u:object_r:same_process_hal_file:s0
+/sys/devices/platform/exynos-drm(/.*)?                             u:object_r:sysfs_gpu:s0
+/sys/devices/platform/soc/13870000\.i2c/i2c-[0-9]+/[0-9]+-0018(/.*)? u:object_r:sysfs_ssp:s0
+/sys/devices/.*/video4linux(/.*)?                                  u:object_r:sysfs_video4linux:s0
+/sys/devices/platform/soc/12550000\.mmc/mmc_host/mmc[0-9]+/mmc[0-9]+:[0-9a-f]+/block/mmcblk[0-9]+(/.*)? u:object_r:sysfs_devices_block:s0
+/vendor/lib/android\.hardware\.graphics\.allocator@4\.0\.so        u:object_r:same_process_hal_file:s0
+/vendor/lib/libaconfig_storage_read_api_cc\.so                     u:object_r:same_process_hal_file:s0
+
+# Partitions (Samsung PIT: EFS p3, BOOT p8, RECOVERY p9, CACHE p12, SYSTEM p13, OTA p15 = /metadata,
+# USERDATA p16)
+/dev/block/mmcblk0p3                                               u:object_r:efs_block_device:s0
+/dev/block/mmcblk0p8                                               u:object_r:boot_block_device:s0
+/dev/block/mmcblk0p9                                               u:object_r:recovery_block_device:s0
+/dev/block/mmcblk0p12                                              u:object_r:cache_block_device:s0
+/dev/block/mmcblk0p13                                              u:object_r:system_block_device:s0
+/dev/block/mmcblk0p15                                              u:object_r:metadata_block_device:s0
+/dev/block/mmcblk0p16                                              u:object_r:userdata_block_device:s0
+/sys/devices/platform/soc/12550000\.mmc/mmc_host/mmc[0-9]+/mmc[0-9]+:[0-9a-f]+(/.*)? u:object_r:sysfs_devices_block:s0

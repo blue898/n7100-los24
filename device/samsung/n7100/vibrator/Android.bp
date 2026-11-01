@@ -1,0 +1,15 @@
+// Galaxy Note II vibrator: the max77693 haptic motor, which mainline exposes as an input
+// force-feedback device
+cc_binary {
+    name: "android.hardware.vibrator-service.n7100",
+    relative_install_path: "hw",
+    init_rc: ["vibrator-n7100.rc"],
+    vintf_fragments: ["vibrator-n7100.xml"],
+    vendor: true,
+    srcs: ["Vibrator.cpp"],
+    shared_libs: [
+        "libbase",
+        "libbinder_ndk",
+        "android.hardware.vibrator-V1-ndk",
+    ],
+}

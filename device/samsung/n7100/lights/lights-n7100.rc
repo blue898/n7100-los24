@@ -1,0 +1,5 @@
+service vendor.light-n7100 /vendor/bin/hw/android.hardware.lights-service.n7100
+    class hal
+    user system
+    group system
+    shutdown critical

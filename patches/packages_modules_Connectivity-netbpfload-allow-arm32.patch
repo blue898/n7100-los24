@@ -1,0 +1,36 @@
+diff --git a/bpf/loader/NetBpfLoad.cpp b/bpf/loader/NetBpfLoad.cpp
+index 7ba3247..6c21eab 100644
+--- a/bpf/loader/NetBpfLoad.cpp
++++ b/bpf/loader/NetBpfLoad.cpp
+@@ -1006,3 +1006,4 @@ static int validateProg(const borrowed_fd& fd, const char* const progPinLoc) {
+         ALOGE("Kernel eBPF JIT failure for %s", progPinLoc);
+-        return -ENOTSUP;
++        // n7100: the ARM32 JIT can't do BPF atomics yet, such programs run interpreted
++        if (!isArm()) return -ENOTSUP;
+     }
+@@ -1592,3 +1593,3 @@ static int doLoad(char** argv, char * const envp[]) {
+         ALOGE("Android V+ platform with 32 bit kernel version >= 5.16.0 is unsupported");
+-        if (!isTV()) return 8;
++        if (!isTV() && !isArm()) return 8;  // n7100: 32-bit-only ARM SoC
+     }
+@@ -1597,3 +1598,3 @@ static int doLoad(char** argv, char * const envp[]) {
+         ALOGE("Android 25Q2 requires 64 bit kernel.");
+-        return 9;
++        if (!isArm()) return 9;  // n7100: 32-bit-only ARM SoC
+     }
+@@ -1603,3 +1604,3 @@ static int doLoad(char** argv, char * const envp[]) {
+         ALOGE("Android platform with 32 bit kernel version >= 6.7.0 is unsupported");
+-        return 10;
++        if (!isArm()) return 10;  // n7100: 32-bit-only ARM SoC
+     }
+@@ -1677,4 +1678,4 @@ static int doLoad(char** argv, char * const envp[]) {
+         } else if (isArm()) {
++            // n7100: 32-bit-only ARM SoC, there is no 64-bit userspace to switch to
+             ALOGE("[Arm] 64-bit userspace required on 6.2+ kernels (%d).", first_api_level);
+-            return 12;
+         } else { // x86 since RiscV cannot be 32-bit
+@@ -1695,3 +1696,3 @@ static int doLoad(char** argv, char * const envp[]) {
+         ALOGE("64-bit userspace required on 6.13+ kernels.");
+-        return 14;
++        if (!isArm()) return 14;  // n7100: 32-bit-only ARM SoC
+     }

@@ -1,0 +1,42 @@
+From 163d77aa76ea6e9e13475077672fcc3f25cf37e8 Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Sat, 27 Sep 2025 00:48:04 +0200
+Subject: [PATCH 77/89] ARM: defconfig: enable ISA1200 motor driver for the
+ p4note
+
+Enable the ISA1200 motor driver in the exynos and multi_v7 defconfig
+files.
+
+Signed-off-by: Martin Juecker <martin.juecker@gmail.com>
+---
+ arch/arm/configs/exynos_defconfig   | 1 +
+ arch/arm/configs/multi_v7_defconfig | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/arch/arm/configs/exynos_defconfig b/arch/arm/configs/exynos_defconfig
+index 8b072a5c0..42f4e19a1 100644
+--- a/arch/arm/configs/exynos_defconfig
++++ b/arch/arm/configs/exynos_defconfig
+@@ -124,6 +124,7 @@ CONFIG_TOUCHSCREEN_MMS114=y
+ CONFIG_INPUT_MISC=y
+ CONFIG_INPUT_MAX77693_HAPTIC=y
+ CONFIG_INPUT_MAX8997_HAPTIC=y
++CONFIG_INPUT_ISA1200_HAPTIC=m
+ CONFIG_SERIAL_8250=y
+ CONFIG_SERIAL_OF_PLATFORM=y
+ CONFIG_SERIAL_SAMSUNG=y
+diff --git a/arch/arm/configs/multi_v7_defconfig b/arch/arm/configs/multi_v7_defconfig
+index f9b8dbf93..a45233f6b 100644
+--- a/arch/arm/configs/multi_v7_defconfig
++++ b/arch/arm/configs/multi_v7_defconfig
+@@ -347,6 +347,7 @@ CONFIG_INPUT_MISC=y
+ CONFIG_INPUT_PM8941_PWRKEY=y
+ CONFIG_INPUT_MAX77693_HAPTIC=m
+ CONFIG_INPUT_MAX8997_HAPTIC=m
++CONFIG_INPUT_ISA1200_HAPTIC=m
+ CONFIG_INPUT_GPIO_DECODER=m
+ CONFIG_INPUT_CPCAP_PWRBUTTON=m
+ CONFIG_INPUT_TPS65219_PWRBUTTON=m
+-- 
+2.53.0
+

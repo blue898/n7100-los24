@@ -1,0 +1,16 @@
+// Galaxy Note II lights: capacitive key backlight (tm2-touchkey) and the RGB notification LED
+// (an30259a). The display backlight is driven by drm_hwcomposer, not here.
+rust_binary {
+    name: "android.hardware.lights-service.n7100",
+    relative_install_path: "hw",
+    init_rc: ["lights-n7100.rc"],
+    vintf_fragments: ["lights-n7100.xml"],
+    vendor: true,
+    rustlibs: [
+        "liblogger",
+        "liblog_rust",
+        "libbinder_rs",
+        "android.hardware.light-V3-rust",
+    ],
+    srcs: ["main.rs"],
+}

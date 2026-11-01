@@ -1,0 +1,26 @@
+# cbd: powers the XMM6262 up over HSIC, loads its firmware from RADIO and its NV data from
+# /efs, and reboots it when it crashes
+type cbd, domain;
+type cbd_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(cbd)
+
+allow cbd radio_device:chr_file rw_file_perms;
+allow cbd block_device:dir search;
+allow cbd modem_block_device:blk_file r_file_perms;
+allow cbd efs_file:dir rw_dir_perms;
+allow cbd efs_file:file create_file_perms;
+r_dir_file(cbd, sysfs_modem)
+allow cbd sysfs_modem:file w_file_perms;
+allow cbd proc_cmdline:file r_file_perms;
+wakelock_use(cbd)
+allow cbd self:capability setuid;
+# ril.cbd.boot_done: radio_prop is the RIL's, and nothing reads it
+dontaudit cbd radio_prop:property_service set;
+dontaudit cbd property_socket:sock_file write;
+dontaudit cbd init:unix_stream_socket connectto;
+# its kernel log (mknod /dev/__cbd_msg_ as kmsg) and klogctl: logging only
+dontaudit cbd self:capability mknod;
+dontaudit cbd self:capability2 syslog;
+dontaudit cbd kernel:system syslog_read;
+dontaudit cbd device:dir w_dir_perms;
+dontaudit cbd device:chr_file create_file_perms;

@@ -1,0 +1,31 @@
+From 3eac5969559c4df2e38be15b414f1e72083ed42a Mon Sep 17 00:00:00 2001
+From: Artur Weber <aweber.kernel@gmail.com>
+Date: Fri, 19 Jul 2024 10:43:23 +0200
+Subject: [PATCH 48/89] ARM: dts: samsung: exynos4212-tab3: Use MMS252
+ compatible for touchscreen
+
+There is now a compatible for the MMS252, use it instead of the generic
+MMA114 compatible.
+
+Signed-off-by: Artur Weber <aweber.kernel@gmail.com>
+---
+ arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+index 36d020364..fe857a84c 100644
+--- a/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4212-tab3.dtsi
+@@ -526,8 +526,7 @@ &i2c_3 {
+ 	status = "okay";
+ 
+ 	touchscreen@48 {
+-		/* MELFAS MMS252, using MMS114 compatible for now */
+-		compatible = "melfas,mms114";
++		compatible = "melfas,mms252", "melfas,mms114";
+ 		reg = <0x48>;
+ 		interrupt-parent = <&gpb>;
+ 		interrupts = <4 IRQ_TYPE_EDGE_FALLING>;
+-- 
+2.53.0
+
