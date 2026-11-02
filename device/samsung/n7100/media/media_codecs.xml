@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Hardware codecs: H.264 decoding on the Exynos 4412's MFC v5 (s5p-mfc), through
+    external/v4l2_codec2's Codec2 service (android.hardware.media.c2-service-v4l2, MfcDecoder).
+    The software codecs come from the media.swcodec APEX.
+-->
+<MediaCodecs>
+    <Decoders>
+        <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">
+            <Limit name="size" min="64x64" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" range="1-244800" />
+            <Limit name="bitrate" range="1-40000000" />
+            <Limit name="concurrent-instances" max="4" />
+        </MediaCodec>
+    </Decoders>
+</MediaCodecs>

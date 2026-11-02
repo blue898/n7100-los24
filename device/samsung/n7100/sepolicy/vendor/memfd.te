@@ -2,9 +2,18 @@
 # tmpfs type of the process that created them. As with /dev/ashmem before, whoever is handed
 # the fd may map it.
 allow domain tmpfs:file { getattr map read write };
-allow { appdomain audioserver cameraserver mediaserver mediaswcodec surfaceflinger system_server
-        hal_audio_default hal_camera_default hal_power_default hal_sensors_default }
-      { appdomain_tmpfs system_server_tmpfs }:file { getattr map read write };
+# Between apps and the system and media services: codec FMQs and buffer pools, extractor buffers
+# (MediaBufferGroup), MediaMetadataRetriever frames, AudioFlinger's track control blocks, camera
+# metadata FMQs
+allow { appdomain audioserver cameraserver mediacodec mediaextractor mediaserver mediaswcodec
+        surfaceflinger system_server hal_audio_default hal_camera_default hal_power_default
+        hal_sensors_default }
+      { appdomain_tmpfs audioserver_tmpfs cameraserver_tmpfs mediaextractor_tmpfs
+        mediaserver_tmpfs system_server_tmpfs }:file { getattr map read write };
 # Apps run with MLS categories, the memfds of the media and system processes don't have any:
-# like ashmem_device, tmpfs must be writable across levels
+# like ashmem_device, they must be writable across levels
 typeattribute tmpfs mlstrustedobject;
+typeattribute audioserver_tmpfs mlstrustedobject;
+typeattribute cameraserver_tmpfs mlstrustedobject;
+typeattribute mediaextractor_tmpfs mlstrustedobject;
+typeattribute mediaserver_tmpfs mlstrustedobject;

@@ -1,0 +1,85 @@
+diff --git a/media/codec2/sfplugin/utils/Codec2BufferUtils.cpp b/media/codec2/sfplugin/utils/Codec2BufferUtils.cpp
+index 27b1b78..ec298d9 100644
+--- a/media/codec2/sfplugin/utils/Codec2BufferUtils.cpp
++++ b/media/codec2/sfplugin/utils/Codec2BufferUtils.cpp
+@@ -22,8 +22,10 @@
+ 
+ #include <libyuv.h>
+ 
++#include <algorithm>
+ #include <list>
+ #include <mutex>
++#include <vector>
+ 
+ #include <android/hardware_buffer.h>
+ #include <media/hardware/HardwareAPI.h>
+@@ -658,8 +660,53 @@ status_t ConvertRGBToPlanarYUV(
+     uint8_t maxLvlLuma =  colorRange == C2Color::RANGE_FULL ? 255 : 235;
+     uint8_t maxLvlChroma =  colorRange == C2Color::RANGE_FULL ? 255 : 240;
+ 
++    // Packed 8-bit RGBA or BGRA, BT.601 (what GPU-rendered input surfaces deliver, e.g. camera
++    // video through CameraX): libyuv's SIMD rows are many times faster than the loop below.
++    const C2PlaneInfo &planeR = layout.planes[C2PlanarLayout::PLANE_R];
++    const C2PlaneInfo &planeG = layout.planes[C2PlanarLayout::PLANE_G];
++    const C2PlaneInfo &planeB = layout.planes[C2PlanarLayout::PLANE_B];
++    if (colorMatrix != C2Color::MATRIX_BT709 && planeR.allocatedDepth == 8 &&
++            planeR.colInc == 4 && planeG.colInc == 4 && planeB.colInc == 4 &&
++            planeR.rowInc == planeG.rowInc && planeR.rowInc == planeB.rowInc) {
++        const bool rgba = pGreen == pRed + 1 && pBlue == pRed + 2;  // libyuv's ABGR
++        const bool bgra = pGreen == pBlue + 1 && pRed == pBlue + 2;  // libyuv's ARGB
++        const int width = src.crop().width, height = src.crop().height;
++        const int srcStride = planeR.rowInc, uvStride = dstStride >> 1;
++        int ret = -1;
++        if (rgba) {
++            ret = (colorRange == C2Color::RANGE_FULL ? libyuv::ABGRToJ420 : libyuv::ABGRToI420)(
++                    pRed, srcStride, dstY, dstStride, dstU, uvStride, dstV, uvStride, width,
++                    height);
++        } else if (bgra) {
++            ret = (colorRange == C2Color::RANGE_FULL ? libyuv::ARGBToJ420 : libyuv::ARGBToI420)(
++                    pBlue, srcStride, dstY, dstStride, dstU, uvStride, dstV, uvStride, width,
++                    height);
++        }
++        if (ret == 0) {
++            return OK;
++        }
++    }
++
++    // Rows of packed pixels are copied into a cached buffer first: buffers rendered by the GPU
++    // are mapped write-combined, and reading them a byte at a time is slow.
++    const bool packed = planeR.rowInc == planeG.rowInc && planeR.rowInc == planeB.rowInc &&
++            planeR.colInc == planeG.colInc && planeR.colInc == planeB.colInc &&
++            planeR.colInc > 0 && planeR.colInc <= 4;
++    const uint8_t *rowBase = std::min(pRed, std::min(pGreen, pBlue));
++    const size_t rowBytes = planeR.colInc * (src.crop().width - 1) + 1 +
++            std::max(pRed, std::max(pGreen, pBlue)) - rowBase;
++    std::vector<uint8_t> rowCopy(packed ? rowBytes : 0);
++
+ #define CLIP3(min,v,max) (((v) < (min)) ? (min) : (((max) > (v)) ? (v) : (max)))
+     for (size_t y = 0; y < src.crop().height; ++y) {
++        const uint8_t *rowR = pRed, *rowG = pGreen, *rowB = pBlue;
++        if (packed) {
++            memcpy(rowCopy.data(), rowBase + y * planeR.rowInc, rowBytes);
++            const uint8_t *srcRow = rowBase + y * planeR.rowInc;
++            pRed = rowCopy.data() + (rowR - srcRow);
++            pGreen = rowCopy.data() + (rowG - srcRow);
++            pBlue = rowCopy.data() + (rowB - srcRow);
++        }
+         for (size_t x = 0; x < src.crop().width; ++x) {
+             uint8_t r = *pRed;
+             uint8_t g = *pGreen;
+@@ -690,12 +737,9 @@ status_t ConvertRGBToPlanarYUV(
+             dstV += dstStride >> 1;
+         }
+ 
+-        pRed   -= layout.planes[C2PlanarLayout::PLANE_R].colInc * src.width();
+-        pGreen -= layout.planes[C2PlanarLayout::PLANE_G].colInc * src.width();
+-        pBlue  -= layout.planes[C2PlanarLayout::PLANE_B].colInc * src.width();
+-        pRed   += layout.planes[C2PlanarLayout::PLANE_R].rowInc;
+-        pGreen += layout.planes[C2PlanarLayout::PLANE_G].rowInc;
+-        pBlue  += layout.planes[C2PlanarLayout::PLANE_B].rowInc;
++        pRed   = rowR + layout.planes[C2PlanarLayout::PLANE_R].rowInc;
++        pGreen = rowG + layout.planes[C2PlanarLayout::PLANE_G].rowInc;
++        pBlue  = rowB + layout.planes[C2PlanarLayout::PLANE_B].rowInc;
+ 
+         dstY += dstStride;
+     }

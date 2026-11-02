@@ -154,7 +154,7 @@ PRODUCT_COPY_FILES += \
 AUDIO_POLICY_CONFIG := frameworks/av/services/audiopolicy/config
 PRODUCT_COPY_FILES += \
     $(DEVICE_PATH)/rootdir/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
-    $(AUDIO_POLICY_CONFIG)/primary_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/primary_audio_policy_configuration.xml \
+    $(DEVICE_PATH)/rootdir/audio/primary_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/primary_audio_policy_configuration.xml \
     $(AUDIO_POLICY_CONFIG)/r_submix_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/r_submix_audio_policy_configuration.xml \
     $(AUDIO_POLICY_CONFIG)/bluetooth_audio_policy_configuration_7_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_audio_policy_configuration_7_0.xml \
     $(AUDIO_POLICY_CONFIG)/usb_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/usb_audio_policy_configuration.xml \
@@ -189,6 +189,24 @@ endif
 # decoders (no ringtones, alarms, system sounds or video)
 PRODUCT_VENDOR_PROPERTIES += \
     media.c2.hal.selection=aidl
+
+# Hardware video decoding: H.264 on the MFC v5 (s5p-mfc, firmware s5p-mfc.fw from the stock ROM)
+# through v4l2_codec2's AIDL Codec2 service, with patches/external_v4l2_codec2-mfc-decoder.patch
+PRODUCT_SOONG_NAMESPACES += external/v4l2_codec2
+PRODUCT_PACKAGES += \
+    android.hardware.media.c2-service-v4l2
+PRODUCT_COPY_FILES += \
+    $(DEVICE_PATH)/media/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml \
+    $(DEVICE_PATH)/media/media_profiles_V1_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml \
+    $(DEVICE_PATH)/media/android.hardware.media.c2-extended-seccomp_policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/android.hardware.media.c2-extended-seccomp_policy
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.vendor.v4l2_codec2.decoder.supported.h264=true \
+    ro.vendor.v4l2_codec2.decode_concurrent_instances=4
+
+# Without OMX (and its HIDL service) CCodec creates encoder input surfaces itself (screenrecord,
+# camera video): else createInputSurface() crashes on a null surface
+PRODUCT_VENDOR_PROPERTIES += \
+    debug.stagefright.c2inputsurface=-1
 
 # Mainline kernels have no ashmem (removed in 5.18): shared memory via memfd
 PRODUCT_SYSTEM_PROPERTIES += \

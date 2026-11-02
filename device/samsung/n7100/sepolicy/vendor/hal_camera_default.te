@@ -3,3 +3,5 @@ allow hal_camera_default video_device:dir r_dir_perms;
 allow hal_camera_default video_device:chr_file rw_file_perms;
 r_dir_file(hal_camera_default, sysfs_video4linux)
 allow hal_camera_default sysfs:dir r_dir_perms;
+# Imports the stream buffers through the Gralloc 5 mapper, which it finds through IAllocator
+hal_client_domain(hal_camera_default, hal_graphics_allocator)

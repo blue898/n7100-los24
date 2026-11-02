@@ -1,0 +1,7 @@
+// MFC v5 (s5p-mfc) test decoder: debugging aid, not in PRODUCT_PACKAGES (test/mfc_test.cpp)
+cc_binary {
+    name: "mfc-test-n7100",
+    vendor: true,
+    srcs: ["test/mfc_test.cpp"],
+    cflags: ["-Wall", "-Werror", "-O2"],
+}

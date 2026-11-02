@@ -12,18 +12,18 @@ written for this port.
 | Display, brightness, auto-brightness | works (EA8061 panel) |
 | GPU | works: Mali-400 MP4 with Mesa lima (OpenGL ES 2), drm_hwcomposer, minigbm |
 | Touchscreen, S Pen, touch keys | work |
-| Audio | works (WM1811: speaker, headphones) |
+| Audio | works (WM1811: speaker, headphones, microphone; capture runs at the playback rate of 44.1 kHz) |
 | Wi-Fi, Bluetooth | work (BCM4334) |
 | Modem | XMM6262 boots, baseband and IMEI are reported; calls, SMS and mobile data are untested (no SIM was at hand) |
 | GPS | the BCM4752 runs and reports NMEA; a fix outdoors is not verified yet |
 | Sensors | work: accelerometer, gyroscope, magnetometer, barometer, light, proximity |
-| Rear camera | preview and photos up to 2304x1296; the autofocus doesn't move the lens |
-| Front camera | doesn't work (FIMC-IS: no frames, see `device/samsung/n7100/camera/README.txt`) |
+| Rear camera | preview, photos up to 2304x1296 and video (software H.264 encoder: about 11 fps at 960x720 through CameraX); the autofocus doesn't move the lens |
+| Front camera | doesn't work: the FIMC-IS firmware from the stock ROM never opens the sensor; the mainline driver was written for the Tizen firmware, which isn't available (`device/samsung/n7100/camera/README.txt`) |
 | Charging, battery, standby | work, with deep sleep; a cable plugged into the switched-off phone boots Android (no charger UI) |
 | USB | adb, MTP; the gadget is gone while the phone is in deep sleep |
 | USB OTG | implemented (role switch through the MAX77693 MUIC, 5 V boost), untested |
 | NFC | not possible: the PN544 is an HCI chip, Android's NFC stack only speaks NCI |
-| Hardware video codecs | not used (MFC v5 outputs tiled NV12MT); software codecs |
+| Hardware video decoding | H.264 up to 1080p30 on the MFC v5, through v4l2_codec2 (Codec2) with a decoder for it; FIMC converts its tiled frames. Other codecs and all encoders are software |
 | Security | SELinux enforcing, file-based encryption (Adiantum: the Cortex-A9 has no AES instructions) |
 
 CPU at 1.6 GHz (Prime operating points), GPU at 533 MHz, schedutil, a power HAL that raises
@@ -73,8 +73,9 @@ the adb key in `device/samsung/n7100/adb_keys` (not in the repository) and stays
 - `device/samsung/n7100/` — the LineageOS device tree, including the HALs written for this port:
   radio (AIDL host for Samsung's libsec-ril), GNSS (around Samsung's legacy GPS HAL and gpsd),
   camera (from AOSP's external camera HAL), power, sensors, lights, vibrator. Each has its notes.
-- `patches/` — changes to LineageOS repositories (`external/minigbm`, `packages/modules/Connectivity`,
-  `vendor/aospext`); `patches/development/` only for development builds.
+- `patches/` — changes to LineageOS repositories (`external/minigbm`, `external/v4l2_codec2`,
+  `frameworks/av`, `packages/modules/Connectivity`, `vendor/aospext`); `patches/development/` only
+  for development builds.
 - `tools/` — extracting blobs, building, the flash zip; `tools/development/` debugging aids.
 - `n7100tool/` — keeps the hardware watchdog fed.
 

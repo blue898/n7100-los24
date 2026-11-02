@@ -1,0 +1,13 @@
+# v4l2_codec2's Codec2 service (MfcDecoder): what its libchrome threads and the V4L2 device
+# poller need on top of frameworks/av's android.hardware.media.c2-default-arm.policy
+clock_nanosleep: 1
+dup3: 1
+epoll_create1: 1
+epoll_ctl: 1
+epoll_pwait: 1
+eventfd2: 1
+getcwd: 1
+pselect6: 1
+sched_getaffinity: 1
+statfs64: 1
+sysinfo: 1

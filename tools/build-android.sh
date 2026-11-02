@@ -22,10 +22,20 @@ export N7100_DEVELOPMENT=${N7100_DEVELOPMENT:-false}
 [ -f "$DT/prebuilt/kernel/zImage-dtb" ] || { echo "no kernel: run tools/build-kernel.sh"; exit 1; }
 (cd "$DT" && sha1sum --quiet -c proprietary/blobs.sha1) || { echo "blobs missing: run tools/extract-blobs.sh"; exit 1; }
 
-# patches/<project path with _ for />-<what>.patch
+# patches/<project path with _ for />-<what>.patch; a "_" that belongs to a directory name stays
+# one (external_v4l2_codec2 -> external/v4l2_codec2)
+project() { # <patch>
+    local part path="" seg=""
+    for part in $(basename "$1" | sed 's/-.*//; s/_/ /g'); do
+        seg=${seg:+${seg}_}$part
+        [ -d "$L/${path:+$path/}$seg" ] && path=${path:+$path/}$seg && seg=""
+    done
+    [ -z "$seg" ] || { echo "no project for $1" >&2; exit 1; }
+    echo "$path"
+}
 apply() { # <patch> <reverse>
     local repo
-    repo=$(basename "$1" | sed 's/-.*//; s|_|/|g')
+    repo=$(project "$1") || exit 1
     if [ "$2" = reverse ]; then
         git -C "$L/$repo" apply -R --check "$1" 2>/dev/null && git -C "$L/$repo" apply -R "$1" || true
     else

@@ -57,7 +57,7 @@ mkdir -p "$S"
 FILES="system/bin/gpsd system/lib/hw/gps.default.so system/bin/gps.cer system/etc/gps.xml
        system/etc/wifi/bcmdhd_sta.bin_b2 system/etc/wifi/nvram_net.txt_murata
        system/vendor/firmware/bcm4334_murata.hcd system/vendor/firmware/fimc_is_fw.bin
-       system/vendor/firmware/setfile.bin"
+       system/vendor/firmware/setfile.bin system/vendor/firmware/mfc_fw.bin"
 if ls "$STOCK"/system.ext4.win[0-9][0-9][0-9] >/dev/null 2>&1; then
     # TWRP splits the backup into complete tar archives (hence --ignore-zeros); member names
     # start with /system
@@ -74,6 +74,7 @@ cp "$S/system/etc/wifi/nvram_net.txt_murata" "$FW/brcm/brcmfmac4334-sdio.samsung
 cp "$S/system/vendor/firmware/bcm4334_murata.hcd" "$FW/brcm/BCM4334B0.hcd"
 cp "$S/system/vendor/firmware/fimc_is_fw.bin" "$FW/exynos4_fimc_is_fw.bin"
 cp "$S/system/vendor/firmware/setfile.bin" "$FW/exynos4_s5k6a3_setfile.bin"
+cp "$S/system/vendor/firmware/mfc_fw.bin" "$FW/s5p-mfc.fw"
 
 echo "== fixups"
 # libsec-ril: our RIL host instead of libril.so, our compat library instead of LineageOS'

@@ -801,6 +801,10 @@ status_t ExternalCameraDevice::calculateMinFps(
         // Empirical: webcams often have close to 2x fps error and cannot support fixed fps range
         fpsRanges.push_back(framerate / 2);
         fpsRanges.push_back(framerate);
+        // The ISP runs at a fixed rate, and video recording wants a fixed range (Aperture,
+        // CameraX: [30, 30])
+        fpsRanges.push_back(framerate);
+        fpsRanges.push_back(framerate);
     }
     minFps /= 2;
     int64_t maxFrameDuration = 1000000000LL / minFps;

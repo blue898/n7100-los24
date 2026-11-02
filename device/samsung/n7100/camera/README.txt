@@ -56,6 +56,23 @@ ISP. Not in the HAL yet.
   protocol of the mainline driver.
 - Test script: tools/development/fronttest.sh (stops the camera HAL; links + formats via media-ctl,
   stream on video8, CSIS1 registers at 0x11890000 while it waits). Reboot between runs.
+- 2026-11-02, five more fresh-boot tries, all failed the same way: the FIMC-IS firmware never
+  answers HIC_OPEN_SENSOR (2 s timeout), the following HIC_POWER_DOWN gets ISR_NDONE 17
+  (IS_ERROR_UNKNOWN). Ruled out:
+  - power: while the open waits, CAM_SENSOR_A (2.8 V) and VT_CAM_1.8V are on, the reset line
+    (GPM1-6) is released, CAM_B_CLKOUT (GPM2-2, function 3) toggles at 24 MHz from XUSBXTI
+    (tools/development/fronttest3.sh);
+  - MCLK drive strength: Samsung's T0 code sets GPM2-2 to the weakest drive (LV1), the mainline
+    DT uses LV4; LV1 made no difference;
+  - the rear camera's supplies (CAM_ISP_SEN_IO_1.8V, CAM_SENSOR_CORE_1.2V) on during the open
+    (fronttest4.sh);
+  - the host protocol: Samsung's Android driver (drivers/media/video/exynos/fimc-is) sends
+    HIC_OPEN_SENSOR exactly like mainline (ISSR1 sensor index 0, ISSR2 sensor name S5K6A3,
+    ISSR3 I2C1, ISSR4 the parameter region with the same sensor_open_extended values, i2c_sclk
+    88 MHz on the 4412 rev 2.0), the same chip id/revision in the shared region.
+  Left: the firmware itself. The mainline driver was written against the Tizen FIMC-IS firmware;
+  only Samsung's Android firmware (E4412 2012/04/16) is available here, and it doesn't open the
+  sensor. Not solvable without the Tizen firmware.
 
 Graphics side (patches/external_minigbm-exynos-dumb.patch): the exynos minigbm backend
 drops SCANOUT for YUV buffers (FIMD can't scan out NV12; the preview is composed by the GPU) and
