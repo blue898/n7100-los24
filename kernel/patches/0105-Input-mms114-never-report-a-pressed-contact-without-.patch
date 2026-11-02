@@ -1,0 +1,44 @@
+From 85a87923ab7b5286cf54f97329fbae2149288475 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Mon, 2 Nov 2026 06:48:14 +0100
+Subject: [PATCH] Input: mms114 - never report a pressed contact without
+ pressure
+
+The MMS152 in the Galaxy Note II reports a strength of 0 in single
+reports of a contact that is still pressed, mostly while the finger
+moves (113 such reports in 26 swipes). Android's input reader takes a
+multi-touch contact whose pressure is 0 for a hovering, lifted finger,
+so it ends the gesture there and starts a new one with the next
+report: a swipe becomes a tap and a second touch. On the home screen
+or the lock screen that adds up to a double tap, which puts the phone
+to sleep, and swipes that start on a widget launch it.
+
+Report at least 1 for a pressed contact.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/input/touchscreen/mms114.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/input/touchscreen/mms114.c b/drivers/input/touchscreen/mms114.c
+index 33f54049a..8731a5a45 100644
+--- a/drivers/input/touchscreen/mms114.c
++++ b/drivers/input/touchscreen/mms114.c
+@@ -298,7 +298,13 @@ static void mms114_process_mt(struct mms114_data *data, struct mms114_touch *tou
+ 	if (pressed) {
+ 		touchscreen_report_pos(input_dev, &data->props, x, y, true);
+ 		input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, touch->width);
+-		input_report_abs(input_dev, ABS_MT_PRESSURE, touch->strength);
++		/*
++		 * The strength of a pressed contact can read 0 (the MMS152 does
++		 * that in single reports while a finger moves). Android takes a
++		 * contact without pressure for a lifted finger and splits the
++		 * gesture into two.
++		 */
++		input_report_abs(input_dev, ABS_MT_PRESSURE, max_t(u8, touch->strength, 1));
+ 	}
+ }
+ 
+-- 
+2.53.0
+
