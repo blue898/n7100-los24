@@ -31,7 +31,13 @@ written for this port.
 | Recovery | LineageOS recovery on the same kernel (adb sideload, reboot), two-stage to fit the 8 MiB partition; see [Installing](#lineageos-recovery) |
 
 CPU at 1.6 GHz (Prime operating points), GPU at 533 MHz, schedutil, a power HAL that raises
-CPU/GPU/memory bus floors on touch and app launches.
+CPU/GPU/memory bus floors on touch and app launches, 1 GB of zram swap (lz4).
+
+The display controller (FIMD) composes the screen from hardware planes but can't scale them, so
+the wallpaper is kept at the screen's height: a 1440x1280 crop of LineageOS' default, no zoom
+behind the shade and the app drawer, and the image wallpaper drawn to fill the display
+(`patches/frameworks_base-imagewallpaper-fill-display.patch`). A scaled wallpaper sent every frame
+with it on screen to GPU composition, on top of the apps' own rendering.
 
 ## Installing
 

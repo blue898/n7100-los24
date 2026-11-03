@@ -47,4 +47,8 @@
         <item>235</item>
         <item>255</item>
     </integer-array>
+
+    <!-- No wallpaper zoom behind the shade and the app drawer: the display controller can't
+         scale, so a zoomed wallpaper sends every frame of those animations to GPU composition -->
+    <item name="config_wallpaperMaxScale" format="float" type="dimen">1</item>
 </resources>

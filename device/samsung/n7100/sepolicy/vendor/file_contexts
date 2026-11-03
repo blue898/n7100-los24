@@ -89,4 +89,6 @@
 /dev/block/mmcblk0p13                                              u:object_r:system_block_device:s0
 /dev/block/mmcblk0p15                                              u:object_r:misc_block_device:s0
 /dev/block/mmcblk0p16                                              u:object_r:userdata_block_device:s0
+# zram swap (fstab, swapon_all): mkswap may only touch swap_block_device
+/dev/block/zram[0-9]+                                              u:object_r:swap_block_device:s0
 /sys/devices/platform/soc/12550000\.mmc/mmc_host/mmc[0-9]+/mmc[0-9]+:[0-9a-f]+(/.*)? u:object_r:sysfs_devices_block:s0

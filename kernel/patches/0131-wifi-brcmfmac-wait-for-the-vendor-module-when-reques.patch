@@ -1,0 +1,75 @@
+From ed2b22a8d845f9dd6d2e5f76b3341f61ab7ef649 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Wed, 4 Nov 2026 00:07:55 +0100
+Subject: [PATCH 131/131] wifi: brcmfmac: wait for the vendor module when
+ request_module() fails
+
+brcmfmac loads its firmware vendor module (brcmfmac-wcc and friends)
+with request_module() when the firmware comes up. Android has no
+usermode modprobe, so that call always fails there, and attaching the
+device then depended on ueventd having loaded the vendor module already.
+ueventd loads it right after brcmfmac returns from its init; when that
+took a few seconds the firmware callback lost the race, the device was
+never attached and the phone came up without wlan0.
+
+When request_module() fails, wait up to 30 s for the vendor module to
+register instead of giving up on the device.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../broadcom/brcm80211/brcmfmac/fwvid.c       | 32 +++++++++++++++----
+ 1 file changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwvid.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwvid.c
+index 41eafcda7..0e208206f 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwvid.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwvid.c
+@@ -57,6 +57,9 @@ static struct brcmf_fwvid_entry fwvid_list[BRCMF_FWVENDOR_NUM] = {
+ };
+ 
+ #if IS_MODULE(CONFIG_BRCMFMAC)
++/* how long to wait for a vendor module that request_module() couldn't load */
++#define BRCMF_FWVID_WAIT_MS	30000
++
+ static int brcmf_fwvid_request_module(enum brcmf_fwvendor fwvid)
+ {
+ 	int ret;
+@@ -67,12 +70,29 @@ static int brcmf_fwvid_request_module(enum brcmf_fwvendor fwvid)
+ 		mutex_unlock(&fwvid_list_lock);
+ 
+ 		ret = request_module("brcmfmac-%s", fwvid_list[fwvid].name);
+-		if (ret)
+-			goto fail;
+-
+-		ret = wait_for_completion_interruptible(reg_done);
+-		if (ret)
+-			goto fail;
++		if (ret) {
++			long left;
++
++			/*
++			 * Without a usermode modprobe (Android) request_module() fails,
++			 * and the vendor module comes from userspace's module loading
++			 * after brcmfmac itself: wait for it to register rather than
++			 * give up on the device.
++			 */
++			brcmf_info("mod=%s: request_module failed %d, waiting for it\n",
++				   fwvid_list[fwvid].name, ret);
++			left = wait_for_completion_interruptible_timeout(reg_done,
++					msecs_to_jiffies(BRCMF_FWVID_WAIT_MS));
++			if (left <= 0) {
++				ret = left ? left : -ETIMEDOUT;
++				goto fail;
++			}
++			ret = 0;
++		} else {
++			ret = wait_for_completion_interruptible(reg_done);
++			if (ret)
++				goto fail;
++		}
+ 
+ 		mutex_lock(&fwvid_list_lock);
+ 	}
+-- 
+2.53.0
+
