@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- One RGB LED (AN30259A) for notifications and the battery, which blinks in hardware:
+         LIGHTS_RGB_NOTIFICATION_LED | LIGHTS_RGB_BATTERY_LED | LIGHTS_PULSATING_LED |
+         LIGHTS_BATTERY_LED -->
+    <integer name="config_deviceLightCapabilities">75</integer>
+</resources>

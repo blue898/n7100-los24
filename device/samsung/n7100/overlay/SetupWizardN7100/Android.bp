@@ -1,0 +1,7 @@
+// Setup wizard spacing for the Note II
+
+runtime_resource_overlay {
+    name: "SetupWizardN7100",
+    vendor: true,
+    sdk_version: "current",
+}

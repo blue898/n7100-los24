@@ -1,0 +1,71 @@
+From 4dc1c82b01708c63d97a3b7b390a71183d2a3826 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 02:15:39 +0100
+Subject: [PATCH 118/128] usb: gadget: configfs: stay awake while a host has
+ the gadget configured
+
+The DWC2 UDC of the Exynos 4 drops off the bus in system suspend, so on
+an Android phone adb and MTP broke whenever the screen went off and the
+system suspended, and the host saw the device go away.
+
+Hold a wakeup source on the android_usb device from USB_STATE=CONFIGURED
+to DISCONNECTED. A charger never configures the gadget, and neither
+does a host while Android has the gadget unbound (charging only).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/usb/gadget/configfs.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/gadget/configfs.c b/drivers/usb/gadget/configfs.c
+index a87ad9430..6c149c2f0 100644
+--- a/drivers/usb/gadget/configfs.c
++++ b/drivers/usb/gadget/configfs.c
+@@ -3,6 +3,7 @@
+ #include <linux/module.h>
+ #include <linux/slab.h>
+ #include <linux/device.h>
++#include <linux/pm_wakeup.h>
+ #include <linux/kstrtox.h>
+ #include <linux/nls.h>
+ #include <linux/usb/composite.h>
+@@ -419,7 +420,7 @@ static void android_work(struct work_struct *data)
+ 	char *disconnected[2] = { "USB_STATE=DISCONNECTED", NULL };
+ 	char *connected[2] = { "USB_STATE=CONNECTED", NULL };
+ 	char *configured[2] = { "USB_STATE=CONFIGURED", NULL };
+-	bool connect = false, config = false, disconnect = false;
++	bool connect = false, config = false, disconnect = false, awake;
+ 	unsigned long flags;
+ 
+ 	if (!gi->dev)
+@@ -435,8 +436,19 @@ static void android_work(struct work_struct *data)
+ 			disconnect = true;
+ 		gi->sw_connected = gi->connected;
+ 	}
++	/*
++	 * Stay awake while a host has the gadget configured: the UDC (DWC2 on Exynos 4) drops off
++	 * the bus in system suspend, and adb or a file transfer would break whenever the screen
++	 * goes off. A charger never configures it. The configuration can outlive the connection
++	 * for a moment, so a disconnected gadget lets go in any case.
++	 */
++	awake = config && gi->connected;
+ 	spin_unlock_irqrestore(&gi->spinlock, flags);
+ 
++	if (awake)
++		pm_stay_awake(gi->dev);
++	else
++		pm_relax(gi->dev);
+ 	if (connect)
+ 		kobject_uevent_env(&gi->dev->kobj, KOBJ_CHANGE, connected);
+ 	if (config)
+@@ -491,6 +503,7 @@ static void android_device_create(struct gadget_info *gi)
+ 		gi->dev = NULL;
+ 		return;
+ 	}
++	device_init_wakeup(gi->dev, true);
+ 	gadget_index++;
+ }
+ 
+-- 
+2.53.0
+

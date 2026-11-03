@@ -23,10 +23,12 @@
 #include <N7100Camera.h>
 #include <aidl/android/hardware/camera/common/CameraDeviceStatus.h>
 #include <aidl/android/hardware/camera/common/Status.h>
+#include <aidl/android/hardware/camera/common/TorchModeStatus.h>
 #include <aidl/android/hardware/camera/provider/BnCameraProvider.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
 
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -41,6 +43,7 @@ namespace implementation {
 
 using ::aidl::android::hardware::camera::common::CameraDeviceStatus;
 using ::aidl::android::hardware::camera::common::Status;
+using ::aidl::android::hardware::camera::common::TorchModeStatus;
 using ::aidl::android::hardware::camera::common::VendorTagSection;
 using ::aidl::android::hardware::camera::device::ICameraDevice;
 using ::aidl::android::hardware::camera::provider::BnCameraProvider;
@@ -51,13 +54,30 @@ using ::android::hardware::camera::device::implementation::ExternalCameraDevice;
 using ::android::hardware::camera::device::implementation::fromStatus;
 using ::android::hardware::camera::device::implementation::N7100CameraInfo;
 using ::android::hardware::camera::device::implementation::N7100Pipeline;
+using ::android::hardware::camera::device::implementation::N7100Torch;
 using ::android::hardware::camera::device::implementation::n7100Cameras;
 using ::android::hardware::camera::external::common::ExternalCameraConfig;
 
 class CameraProvider : public BnCameraProvider {
   public:
     CameraProvider() : mCfg(ExternalCameraConfig::loadFromCfg(kConfigPath)) {
-        if (scan()) return;
+        N7100Torch::setListener([this](const std::string& id, N7100Torch::Status status) {
+            std::shared_ptr<ICameraProviderCallback> cb;
+            {
+                std::lock_guard lock(mLock);
+                cb = mCallback;
+            }
+            for (const auto& info : n7100Cameras()) {
+                if (cb && info.id == id)
+                    cb->torchModeStatusChange(deviceName(info),
+                                              static_cast<TorchModeStatus>(status));
+            }
+        });
+        if (scan()) {
+            std::lock_guard lock(mLock);
+            mDiscoveryDone = true;
+            return;
+        }
         // The capture nodes appear once the camera modules have probed and the media graph is
         // complete, which at boot can be well after this service starts: keep looking, and
         // announce each camera as it shows up
@@ -70,7 +90,16 @@ class CameraProvider : public BnCameraProvider {
                     ALOGW("camera %s: no capture node %s", info.id.c_str(),
                           info.videoNode.c_str());
             }
+            mDiscoveryDone = true;
+            mDiscoveryCv.notify_all();
         }).detach();
+    }
+
+    // Until all cameras are there or the discovery gives up: cameraserver looks for flash units
+    // only when the provider registers, a camera announced later never gets its torch
+    void waitForDiscovery() {
+        std::unique_lock lock(mLock);
+        mDiscoveryCv.wait(lock, [this] { return mDiscoveryDone; });
     }
 
     ndk::ScopedAStatus setCallback(const std::shared_ptr<ICameraProviderCallback>& cb) override {
@@ -170,6 +199,8 @@ class CameraProvider : public BnCameraProvider {
     std::mutex mLock;
     std::map<std::string, const N7100CameraInfo*> mCameras;  // device name -> camera
     std::shared_ptr<ICameraProviderCallback> mCallback;
+    std::condition_variable mDiscoveryCv;
+    bool mDiscoveryDone = false;
 };
 
 }  // namespace implementation
@@ -184,6 +215,7 @@ int main() {
     ABinderProcess_setThreadPoolMaxThreadCount(6);
 
     auto provider = ndk::SharedRefBase::make<CameraProvider>();
+    provider->waitForDiscovery();
     const std::string name = std::string(CameraProvider::descriptor) + "/internal/0";
     binder_exception_t ret = AServiceManager_addService(provider->asBinder().get(), name.c_str());
     LOG_ALWAYS_FATAL_IF(ret != EX_NONE, "Error registering camera provider %s: %d", name.c_str(),

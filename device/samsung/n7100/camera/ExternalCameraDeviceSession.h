@@ -252,7 +252,10 @@ class ExternalCameraDeviceSession : public BnCameraDeviceSession, public OutputT
     Status initStatus() const;
     status_t initDefaultRequests();
 
-    status_t fillCaptureResult(common::V1_0::helper::CameraMetadata& md, nsecs_t timestamp);
+    status_t fillCaptureResult(common::V1_0::helper::CameraMetadata& md, nsecs_t timestamp,
+                               int luma);
+    // The request's AF region in pixels of the V4L2 stream, none for the whole picture
+    std::optional<v4l2_rect> focusArea(const common::V1_0::helper::CameraMetadata& md) const;
     int configureV4l2StreamLocked(const SupportedV4L2Format& fmt, double fps = 0.0);
     int v4l2StreamOffLocked();
 
@@ -358,10 +361,26 @@ class ExternalCameraDeviceSession : public BnCameraDeviceSession, public OutputT
 
     std::mutex mAfTriggerLock;  // protect mAfTrigger and the autofocus scan state
     bool mAfTrigger = false;
+    uint8_t mAfMode = UINT8_MAX;    // ANDROID_CONTROL_AF_MODE_* of the last request
     bool mAfScanning = false;       // a single autofocus scan is running on the sensor
-    uint32_t mAfScanFrames = 0;     // results since the scan was started
+    bool mAfLockPending = false;    // continuous AF: lock once its scan is done
+    bool mCafOn = false;            // the sensor's continuous AF runs
+    uint8_t mCafState = 0;          // ANDROID_CONTROL_AF_STATE_PASSIVE_* of the continuous AF
+    uint32_t mAfScanFrames = 0;     // results since the start while the sensor wasn't busy yet
+    bool mAfSawBusy = false;        // the sensor reported the scan (or continuous AF) as busy
     uint8_t mAfLockedState = 0;     // ANDROID_CONTROL_AF_STATE_* after the last scan
     uint32_t mFramesSinceStreamOn = 0;
+
+    // The torch as the flash for stills (AE_MODE_ON_AUTO_FLASH/ON_ALWAYS_FLASH): lit from the
+    // precapture trigger until the still capture. Results come in order on the output thread.
+    enum class FlashPhase { OFF, PRECAPTURE, LIT };
+    FlashPhase mFlashPhase = FlashPhase::OFF;
+    uint32_t mFlashFrames = 0;  // results in the current phase
+    bool mLedOn = false;        // the LED was lit for the frames now coming in
+    int mSceneLuma = 255;       // of the last frame taken without the LED
+
+    // AE bias set on the sensor (1/2 EV steps); none yet: the driver's default isn't 0 EV
+    int32_t mExposureBias = INT32_MIN;
 
     uint32_t mBlobBufferSize = 0;
 

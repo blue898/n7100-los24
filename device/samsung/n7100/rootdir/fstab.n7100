@@ -3,8 +3,12 @@
 /dev/block/by-name/SYSTEM      /system      ext4    ro,barrier=1                                         wait,first_stage_mount
 /dev/block/by-name/HIDDEN      /vendor      ext4    ro,barrier=1                                         wait,first_stage_mount
 # /metadata (aconfigd's flag storage, without it system_server dies on "Invalid feature flag") on the
-# unused 8 MiB Samsung FOTA partition
-/dev/block/by-name/OTA         /metadata    ext4    noatime,nosuid,nodev,discard                         wait,check,formattable,first_stage_mount
+# CACHE partition, which nothing else uses
+/dev/block/by-name/CACHE       /metadata    ext4    noatime,nosuid,nodev,discard                         wait,check,formattable,first_stage_mount
+# The bootloader message (reboot into recovery, factory reset) on the 8 MiB Samsung FOTA partition,
+# where TWRP for the n7100 and LineageOS 21 keep it too. Without /misc, init refuses
+# "reboot,recovery".
+/dev/block/by-name/OTA         /misc        emmc    defaults                                             defaults
 # File-based encryption with Adiantum: the Cortex-A9 has no AES instructions. No metadata
 # encryption: mainline has no dm-default-key. An empty USERDATA gets formatted on first boot.
 /dev/block/by-name/USERDATA    /data        ext4    noatime,nosuid,nodev,noauto_da_alloc,errors=panic    wait,check,formattable,fileencryption=adiantum:adiantum:v2,quota,reservedsize=128M

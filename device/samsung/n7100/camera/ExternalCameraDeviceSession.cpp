@@ -37,6 +37,7 @@
 #include <linux/videodev2.h>
 #include <sync/sync.h>
 #include <utils/Trace.h>
+#include <algorithm>
 #include <deque>
 
 #define HAVE_JPEG  // required for libyuv.h to export MJPEG decode APIs
@@ -58,7 +59,12 @@ const int kBadFramesAfterStreamOn = 1;  // drop x frames after streamOn to get r
                                         // bad frames. TODO: develop a better bad frame detection
                                         // method
 constexpr uint32_t kInitialFocusFrame = 15;      // own autofocus scan ~0.5 s after stream on
-constexpr uint32_t kFocusStatusDelayFrames = 3;  // the sensor needs a moment to report "busy"
+constexpr uint32_t kFocusStartFrames = 30;  // a new scan shows up as busy within these frames
+// Torch as flash: the auto flash fires below this mean luma; the sensor's ISP gets this many
+// frames to adjust its exposure to the light; the LED goes off again if no still capture comes
+constexpr int kFlashLuma = 50;
+constexpr uint32_t kFlashSettleFrames = 8;
+constexpr uint32_t kFlashWaitFrames = 45;
 constexpr int MAX_RETRY = 15;  // Allow retry some ioctl failures a few times to account for some
                                // webcam showing temporarily ioctl failures.
 constexpr int IOCTL_RETRY_SLEEP_US = 33000;  // 33ms * MAX_RETRY = 0.5 seconds
@@ -588,6 +594,16 @@ Status ExternalCameraDeviceSession::processOneCaptureRequest(const CaptureReques
         return Status::ILLEGAL_ARGUMENT;
     }
 
+    // AE compensation becomes the sensor's AE bias
+    if (mPipeline->info().exposureBias) {
+        camera_metadata_entry ev = mLatestReqSetting.find(ANDROID_CONTROL_AE_EXPOSURE_COMPENSATION);
+        int32_t halfSteps = ev.count == 1 ? ev.data.i32[0] : 0;
+        if (halfSteps != mExposureBias) {
+            mPipeline->setExposureBias(halfSteps);
+            mExposureBias = halfSteps;
+        }
+    }
+
     size_t numOutputBufs = request.outputBuffers.size();
 
     if (numOutputBufs == 0) {
@@ -921,7 +937,8 @@ status_t ExternalCameraDeviceSession::initDefaultRequests() {
     const uint8_t aePrecaptureTrigger = ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE;
     UPDATE(md, ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER, &aePrecaptureTrigger, 1);
 
-    const uint8_t afMode = ANDROID_CONTROL_AF_MODE_AUTO;
+    const uint8_t afMode = mPipeline->info().autofocus ? ANDROID_CONTROL_AF_MODE_AUTO
+                                                       : ANDROID_CONTROL_AF_MODE_OFF;
     UPDATE(md, ANDROID_CONTROL_AF_MODE, &afMode, 1);
 
     const uint8_t afTrigger = ANDROID_CONTROL_AF_TRIGGER_IDLE;
@@ -1010,6 +1027,13 @@ status_t ExternalCameraDeviceSession::initDefaultRequests() {
                 continue;
         }
         UPDATE(mdCopy, ANDROID_CONTROL_CAPTURE_INTENT, &intent, 1);
+        if (mPipeline->info().autofocus) {
+            const bool video = type == RequestTemplate::VIDEO_RECORD ||
+                               type == RequestTemplate::VIDEO_SNAPSHOT;
+            const uint8_t afMode = video ? ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                                         : ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+            UPDATE(mdCopy, ANDROID_CONTROL_AF_MODE, &afMode, 1);
+        }
         camera_metadata_t* mdPtr = mdCopy.release();
         uint8_t* rawMd = reinterpret_cast<uint8_t*>(mdPtr);
         CameraMetadata aidlMd;
@@ -1020,55 +1044,205 @@ status_t ExternalCameraDeviceSession::initDefaultRequests() {
     return OK;
 }
 
+std::optional<v4l2_rect> ExternalCameraDeviceSession::focusArea(
+        const common::V1_0::helper::CameraMetadata& md) const {
+    camera_metadata_ro_entry region = md.find(ANDROID_CONTROL_AF_REGIONS);
+    camera_metadata_ro_entry active =
+            mCameraCharacteristics.find(ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+    if (region.count < 5 || region.data.i32[4] == 0 || active.count < 4) {
+        return std::nullopt;
+    }
+    // The stream shows the centre of the active array in its own aspect ratio
+    const double w = mV4l2StreamingFmt.width, h = mV4l2StreamingFmt.height;
+    const double scale = std::min(active.data.i32[2] / w, active.data.i32[3] / h);
+    const double x0 = (active.data.i32[2] - w * scale) / 2, y0 = (active.data.i32[3] - h * scale) / 2;
+    auto toStream = [scale](double v, double origin, double size) {
+        return static_cast<int32_t>(std::clamp((v - origin) / scale, 0.0, size));
+    };
+    const int32_t left = toStream(region.data.i32[0], x0, w);
+    const int32_t top = toStream(region.data.i32[1], y0, h);
+    const int32_t right = toStream(region.data.i32[2], x0, w);
+    const int32_t bottom = toStream(region.data.i32[3], y0, h);
+    if (right <= left || bottom <= top || (right - left >= w && bottom - top >= h)) {
+        return std::nullopt;
+    }
+    return v4l2_rect{left, top, static_cast<uint32_t>(right - left),
+                     static_cast<uint32_t>(bottom - top)};
+}
+
 status_t ExternalCameraDeviceSession::fillCaptureResult(common::V1_0::helper::CameraMetadata& md,
-                                                        nsecs_t timestamp) {
-    // AF mode AUTO: an AF trigger runs one autofocus scan on the sensor, its result is locked
-    // until the trigger is cancelled. Shortly after the stream starts the HAL scans once by
-    // itself so the preview isn't left at the lens' rest position.
-    uint8_t afState;
-    {
+                                                        nsecs_t timestamp, int luma) {
+    // AF mode AUTO: an AF trigger runs one autofocus scan on the sensor, on the request's AF
+    // region (tap-to-focus) or the centre; its result is locked until the trigger is cancelled.
+    // Shortly after the stream starts the HAL scans once by itself so the preview isn't left at
+    // the lens' rest position. CONTINUOUS_PICTURE/VIDEO: the sensor's continuous AF on the
+    // centre; an AF trigger locks the lens once the running scan is done (VIDEO: at once) and
+    // stops it until the trigger is cancelled. A trigger with an AF region runs a scan on the
+    // region in these modes too (apps keep the continuous mode for tap-to-focus). A fixed-focus
+    // camera stays INACTIVE.
+    uint8_t afState = ANDROID_CONTROL_AF_STATE_INACTIVE;
+    if (mPipeline->info().autofocus) {
         std::lock_guard<std::mutex> lk(mAfTriggerLock);
-        bool start = ++mFramesSinceStreamOn == kInitialFocusFrame && !mAfTrigger;
+        uint8_t afMode = ANDROID_CONTROL_AF_MODE_AUTO;
+        if (md.exists(ANDROID_CONTROL_AF_MODE)) {
+            afMode = md.find(ANDROID_CONTROL_AF_MODE).data.u8[0];
+        }
+        uint8_t trigger = ANDROID_CONTROL_AF_TRIGGER_IDLE;
         if (md.exists(ANDROID_CONTROL_AF_TRIGGER)) {
-            camera_metadata_entry entry = md.find(ANDROID_CONTROL_AF_TRIGGER);
-            if (entry.data.u8[0] == ANDROID_CONTROL_AF_TRIGGER_START) {
-                mAfTrigger = start = true;
-            } else if (entry.data.u8[0] == ANDROID_CONTROL_AF_TRIGGER_CANCEL) {
-                mAfTrigger = false;
+            trigger = md.find(ANDROID_CONTROL_AF_TRIGGER).data.u8[0];
+        }
+        const bool continuous = afMode == ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE ||
+                                afMode == ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO;
+        if (afMode != mAfMode) {
+            mAfMode = afMode;
+            mAfTrigger = mAfScanning = mAfLockPending = false;
+        }
+        bool start = ++mFramesSinceStreamOn == kInitialFocusFrame && !mAfTrigger &&
+                     afMode == ANDROID_CONTROL_AF_MODE_AUTO;
+        std::optional<v4l2_rect> area;
+        if (trigger == ANDROID_CONTROL_AF_TRIGGER_START) {
+            area = focusArea(md);
+            mAfTrigger = true;
+            mAfLockPending = continuous && !area;
+            start = afMode == ANDROID_CONTROL_AF_MODE_AUTO || (continuous && area);
+        } else if (trigger == ANDROID_CONTROL_AF_TRIGGER_CANCEL) {
+            mAfTrigger = mAfLockPending = false;
+        }
+
+        const bool caf = continuous && (!mAfTrigger || mAfLockPending);
+        if (caf != mCafOn) {
+            if (caf) {
+                mPipeline->setFocusArea(std::nullopt);
+                mCafState = ANDROID_CONTROL_AF_STATE_INACTIVE;
+                mAfScanFrames = 0;
+                mAfSawBusy = false;
             }
+            mPipeline->setContinuousFocus(caf);
+            mCafOn = caf;
         }
         if (start) {
+            mPipeline->setFocusArea(area);
             mPipeline->startFocus();
             mAfScanning = true;
             mAfScanFrames = 0;
+            mAfSawBusy = false;
         }
-        // The status still shows the previous scan for a moment after the start
-        if (mAfScanning && ++mAfScanFrames > kFocusStatusDelayFrames) {
-            switch (mPipeline->focusStatus()) {
-                case V4L2_AUTO_FOCUS_STATUS_REACHED:
-                    mAfScanning = false;
-                    mAfLockedState = ANDROID_CONTROL_AF_STATE_FOCUSED_LOCKED;
-                    break;
-                case V4L2_AUTO_FOCUS_STATUS_FAILED:
-                    mAfScanning = false;
-                    mAfLockedState = ANDROID_CONTROL_AF_STATE_NOT_FOCUSED_LOCKED;
-                    break;
+
+        // After a start the sensor keeps reporting the previous result until the new scan runs
+        // (~0.3 s at 1600x1200): a result counts once the scan was seen busy
+        uint32_t status = V4L2_AUTO_FOCUS_STATUS_BUSY;
+        if (mAfScanning || mCafOn) {
+            status = mPipeline->focusStatus();
+            mAfSawBusy |= status == V4L2_AUTO_FOCUS_STATUS_BUSY;
+            if (!mAfSawBusy && ++mAfScanFrames <= kFocusStartFrames) {
+                status = V4L2_AUTO_FOCUS_STATUS_BUSY;
             }
         }
-        if (!mAfTrigger) {
-            afState = ANDROID_CONTROL_AF_STATE_INACTIVE;
-        } else if (mAfScanning) {
-            afState = ANDROID_CONTROL_AF_STATE_ACTIVE_SCAN;
-        } else {
+        const uint8_t lockedState = status == V4L2_AUTO_FOCUS_STATUS_REACHED
+                                            ? ANDROID_CONTROL_AF_STATE_FOCUSED_LOCKED
+                                            : ANDROID_CONTROL_AF_STATE_NOT_FOCUSED_LOCKED;
+        if (mAfScanning && (status == V4L2_AUTO_FOCUS_STATUS_REACHED ||
+                            status == V4L2_AUTO_FOCUS_STATUS_FAILED)) {
+            mAfScanning = false;
+            mAfLockedState = lockedState;
+        }
+        if (mCafOn) {
+            mCafState = status == V4L2_AUTO_FOCUS_STATUS_REACHED
+                                ? ANDROID_CONTROL_AF_STATE_PASSIVE_FOCUSED
+                        : status == V4L2_AUTO_FOCUS_STATUS_FAILED
+                                ? ANDROID_CONTROL_AF_STATE_PASSIVE_UNFOCUSED
+                                : ANDROID_CONTROL_AF_STATE_PASSIVE_SCAN;
+        }
+        if (mAfLockPending && (afMode == ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO ||
+                               mCafState == ANDROID_CONTROL_AF_STATE_PASSIVE_FOCUSED ||
+                               mCafState == ANDROID_CONTROL_AF_STATE_PASSIVE_UNFOCUSED)) {
+            // the lens stays where the continuous AF left it
+            mAfLockPending = false;
+            mAfLockedState = mCafState == ANDROID_CONTROL_AF_STATE_PASSIVE_FOCUSED
+                                     ? ANDROID_CONTROL_AF_STATE_FOCUSED_LOCKED
+                                     : ANDROID_CONTROL_AF_STATE_NOT_FOCUSED_LOCKED;
+            mPipeline->setContinuousFocus(false);
+            mCafOn = false;
+        }
+
+        if (mAfTrigger && (mAfScanning || mAfLockPending)) {
+            afState = continuous ? ANDROID_CONTROL_AF_STATE_PASSIVE_SCAN
+                                 : ANDROID_CONTROL_AF_STATE_ACTIVE_SCAN;
+        } else if (mAfTrigger) {
             afState = mAfLockedState;
+        } else if (mCafOn) {
+            afState = mCafState;
         }
     }
     UPDATE(md, ANDROID_CONTROL_AF_STATE, &afState, 1);
 
+    // The flash LED: FLASH_MODE_TORCH lights it for as long as the requests ask for it. For
+    // stills with AE_MODE_ON_ALWAYS_FLASH, or ON_AUTO_FLASH in a dark scene, the torch is the
+    // flash: lit from the precapture trigger (AE reports PRECAPTURE while the sensor's ISP adjusts
+    // its exposure to the light) until the still capture has been taken.
+    uint8_t flashState = ANDROID_FLASH_STATE_UNAVAILABLE;
+    uint8_t aeState = ANDROID_CONTROL_AE_STATE_CONVERGED;
+    if (N7100Torch* torch = N7100Torch::get(mPipeline->info())) {
+        auto setting = [&md](uint32_t tag, uint8_t fallback) {
+            camera_metadata_entry entry = md.find(tag);
+            return entry.count == 1 ? entry.data.u8[0] : fallback;
+        };
+        const uint8_t aeMode = setting(ANDROID_CONTROL_AE_MODE, ANDROID_CONTROL_AE_MODE_ON);
+        const uint8_t trigger = setting(ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER,
+                                        ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_IDLE);
+        const uint8_t intent = setting(ANDROID_CONTROL_CAPTURE_INTENT,
+                                       ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW);
+        const bool torchMode = setting(ANDROID_FLASH_MODE, ANDROID_FLASH_MODE_OFF) ==
+                               ANDROID_FLASH_MODE_TORCH;
+
+        const bool lit = mLedOn;  // this frame was taken with the LED on
+        if (!lit && luma >= 0) {
+            mSceneLuma = luma;
+        }
+        const bool dark = mSceneLuma < kFlashLuma;
+        const bool flash = aeMode == ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH ||
+                           (aeMode == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH && dark);
+        if (trigger == ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_START) {
+            mFlashPhase = flash ? FlashPhase::PRECAPTURE : FlashPhase::OFF;
+            mFlashFrames = 0;
+        } else if (trigger == ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL) {
+            mFlashPhase = FlashPhase::OFF;
+        }
+        switch (mFlashPhase) {
+            case FlashPhase::PRECAPTURE:
+                aeState = ANDROID_CONTROL_AE_STATE_PRECAPTURE;
+                if (++mFlashFrames >= kFlashSettleFrames) {
+                    mFlashPhase = FlashPhase::LIT;
+                    mFlashFrames = 0;
+                }
+                break;
+            case FlashPhase::LIT:
+                if ((intent == ANDROID_CONTROL_CAPTURE_INTENT_STILL_CAPTURE && lit) ||
+                    ++mFlashFrames > kFlashWaitFrames) {
+                    mFlashPhase = FlashPhase::OFF;
+                }
+                break;
+            case FlashPhase::OFF:
+                if (aeMode == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH && dark) {
+                    aeState = ANDROID_CONTROL_AE_STATE_FLASH_REQUIRED;
+                }
+                break;
+        }
+        mLedOn = torchMode || mFlashPhase != FlashPhase::OFF;
+        torch->setCapture(mLedOn);
+        flashState = lit ? ANDROID_FLASH_STATE_FIRED : ANDROID_FLASH_STATE_READY;
+    }
+
     camera_metadata_ro_entry activeArraySize =
             mCameraCharacteristics.find(ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE);
 
-    return fillCaptureResultCommon(md, timestamp, activeArraySize);
+    status_t ret = fillCaptureResultCommon(md, timestamp, activeArraySize);
+    if (ret != OK) {
+        return ret;
+    }
+    UPDATE(md, ANDROID_FLASH_STATE, &flashState, 1);
+    UPDATE(md, ANDROID_CONTROL_AE_STATE, &aeState, 1);
+    return OK;
 }
 
 int ExternalCameraDeviceSession::configureV4l2StreamLocked(const SupportedV4L2Format& v4l2Fmt,
@@ -1263,8 +1437,10 @@ int ExternalCameraDeviceSession::configureV4l2StreamLocked(const SupportedV4L2Fo
     mV4l2StreamingFmt = v4l2Fmt;
     mV4l2Streaming = true;
     {
+        // the pipeline setup stopped the continuous AF
         std::lock_guard<std::mutex> lk(mAfTriggerLock);
         mFramesSinceStreamOn = 0;
+        mCafOn = false;
     }
     return OK;
 }
@@ -1482,6 +1658,9 @@ void ExternalCameraDeviceSession::closeImpl() {
         ALOGV("%s: closing V4L2 camera FD %d", __FUNCTION__, mV4l2Fd.get());
         mV4l2Fd.reset();
         mClosed = true;
+        if (N7100Torch* torch = N7100Torch::get(mPipeline->info())) {
+            torch->closed();
+        }
     }
 }
 
@@ -1880,7 +2059,7 @@ Status ExternalCameraDeviceSession::processCaptureResult(std::shared_ptr<HalRequ
     }
 
     // Fill capture result metadata
-    fillCaptureResult(req->setting, req->shutterTs);
+    fillCaptureResult(req->setting, req->shutterTs, req->luma);
     const camera_metadata_t* rawResult = req->setting.getAndLock();
     convertToAidl(rawResult, &result.result);
     req->setting.unlock(rawResult);
@@ -2926,6 +3105,16 @@ bool ExternalCameraDeviceSession::OutputThread::threadLoop() {
             signalRequestDone();
             return true;
         }
+
+        // Mean luma on a 16-pixel grid, for the auto flash
+        const uint8_t* luma = static_cast<const uint8_t*>(mYu12FrameLayout.y);
+        uint64_t sum = 0, samples = 0;
+        for (uint32_t y = 0; y < mYu12Frame->mHeight; y += 16) {
+            for (uint32_t x = 0; x < mYu12Frame->mWidth; x += 16, samples++) {
+                sum += luma[y * mYu12FrameLayout.yStride + x];
+            }
+        }
+        req->luma = samples ? sum / samples : -1;
     }
 
     ATRACE_BEGIN("Wait for BufferRequest done");

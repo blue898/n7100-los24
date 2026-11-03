@@ -1,0 +1,37 @@
+From f0d4c8983c27832e2782f62da6a8461d6c7a0f00 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 10:46:08 +0100
+Subject: [PATCH 126/128] media: s5p-mfc: report the encoder input stride on
+ MFC v5
+
+The encoder's VIDIOC_S_FMT and G_FMT on the source queue report
+ctx->stride[] as the planes' bytesperline, but only the MFC v6+ code
+sets it: on MFC v5 it is 0. Userspace that derives the coded size or
+the line layout from the format (Android's V4L2 Codec2 encoder) gets
+0x0.
+
+Set the strides to the buffer width, the line pitch of both NV12M and
+NV12MT input on MFC v5.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/platform/samsung/s5p-mfc/s5p_mfc_opr_v5.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_opr_v5.c b/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_opr_v5.c
+index 365f552e6..953901fd0 100644
+--- a/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_opr_v5.c
++++ b/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_opr_v5.c
+@@ -339,6 +339,9 @@ static void s5p_mfc_enc_calc_src_size_v5(struct s5p_mfc_ctx *ctx)
+ 		ctx->chroma_size =
+ 			ALIGN(ctx->chroma_size, S5P_FIMV_NV12MT_SALIGN);
+ 	}
++	/* VIDIOC_S_FMT and G_FMT report these as the planes' bytesperline */
++	ctx->stride[0] = ctx->buf_width;
++	ctx->stride[1] = ctx->buf_width;
+ }
+ 
+ /* Set registers for decoding temporary buffers */
+-- 
+2.53.0
+

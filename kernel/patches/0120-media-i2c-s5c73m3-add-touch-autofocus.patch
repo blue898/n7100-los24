@@ -1,0 +1,191 @@
+From d9e2d10cbfc1bd21c0e68858e733c87d7e39755c Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 07:14:05 +0100
+Subject: [PATCH 120/128] media: i2c: s5c73m3: add touch autofocus
+
+The ISP can focus on a point of the picture (touch AF), the driver
+only focused on the centre. Samsung's driver writes the point and the
+frame size to the ISP and then sends the touch AF command.
+
+Add a control for the area to focus on, a rectangle in pixels of the
+ISP's output frame: an autofocus scan then focuses on its centre. An
+area that covers the frame, the default, is the normal autofocus;
+going back to it sets the AF mode again, which takes the ISP back to
+the centre, also for continuous AF, which doesn't use the area.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/i2c/s5c73m3/s5c73m3-core.c  |  1 +
+ drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c | 69 ++++++++++++++++++++++-
+ drivers/media/i2c/s5c73m3/s5c73m3.h       |  2 +
+ include/uapi/linux/v4l2-controls.h        | 13 +++++
+ 4 files changed, 84 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3-core.c b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+index f89cd9efd..8518545aa 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3-core.c
++++ b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+@@ -1416,6 +1416,7 @@ static int __s5c73m3_power_off(struct s5c73m3 *state)
+ 
+ 	state->streaming = 0;
+ 	state->isp_ready = 0;
++	state->af_touch = 0;
+ 
+ 	for (i = S5C73M3_MAX_SUPPLIES - 1; i >= 0; i--) {
+ 		ret = regulator_disable(state->supplies[i].consumer);
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c b/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c
+index 1c8103670..4c9184f64 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c
++++ b/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c
+@@ -163,14 +163,63 @@ static int s5c73m3_set_white_balance(struct s5c73m3 *state, int val)
+ 	return -EINVAL;
+ }
+ 
++static bool s5c73m3_af_area_is_spot(struct s5c73m3 *state)
++{
++	const struct v4l2_rect *r = state->ctrls.af_area->p_cur.p_rect;
++	const struct s5c73m3_frame_size *fs = state->oif_pix_size[RES_ISP];
++
++	return r->left > 0 || r->top > 0 ||
++	       (s64)r->left + r->width < fs->width ||
++	       (s64)r->top + r->height < fs->height;
++}
++
++/* Touch AF: the ISP focuses on the centre of the AF area */
++static int s5c73m3_af_touch(struct s5c73m3 *state)
++{
++	const struct v4l2_rect *r = state->ctrls.af_area->p_cur.p_rect;
++	const struct s5c73m3_frame_size *fs = state->oif_pix_size[RES_ISP];
++	const u16 pos[] = {
++		clamp_t(s64, r->left + (s64)r->width / 2, 0, fs->width - 1),
++		clamp_t(s64, r->top + (s64)r->height / 2, 0, fs->height - 1),
++		fs->width,
++		fs->height,
++	};
++	int i, ret;
++
++	for (i = 0; i < ARRAY_SIZE(pos); i++) {
++		ret = s5c73m3_write(state, REG_AF_TOUCH_POSITION + 2 * i,
++				    pos[i]);
++		if (ret < 0)
++			return ret;
++	}
++
++	return s5c73m3_isp_command(state, COMM_AF_TOUCH_AF, 0);
++}
++
+ static int s5c73m3_af_run(struct s5c73m3 *state, bool on)
+ {
+ 	struct s5c73m3_ctrls *c = &state->ctrls;
++	int ret;
+ 
+ 	if (!on)
+ 		return s5c73m3_isp_command(state, COMM_AF_CON,
+ 							COMM_AF_CON_STOP);
+ 
++	if (!c->focus_auto->val && s5c73m3_af_area_is_spot(state)) {
++		state->af_touch = 1;
++		return s5c73m3_af_touch(state);
++	}
++
++	/* Setting the AF mode takes the ISP back to the centre */
++	if (state->af_touch) {
++		ret = s5c73m3_isp_command(state, COMM_AF_MODE,
++			c->af_distance->val == V4L2_AUTO_FOCUS_RANGE_MACRO ?
++			COMM_AF_MODE_MACRO : COMM_AF_MODE_NORMAL);
++		if (ret)
++			return ret;
++		state->af_touch = 0;
++	}
++
+ 	if (c->focus_auto->val)
+ 		return s5c73m3_isp_command(state, COMM_AF_MODE,
+ 					   COMM_AF_MODE_PREVIEW_CAF_START);
+@@ -426,6 +475,20 @@ static const struct v4l2_ctrl_ops s5c73m3_ctrl_ops = {
+ 	.s_ctrl			= s5c73m3_s_ctrl,
+ };
+ 
++/* Covers any frame: no touch AF */
++static const struct v4l2_rect s5c73m3_af_area_def = {
++	.width = U16_MAX,
++	.height = U16_MAX,
++};
++
++static const struct v4l2_ctrl_config s5c73m3_af_area = {
++	.ops = &s5c73m3_ctrl_ops,
++	.id = V4L2_CID_S5C73M3_AF_AREA,
++	.name = "Auto Focus Area",
++	.type = V4L2_CTRL_TYPE_RECT,
++	.p_def.p_const = &s5c73m3_af_area_def,
++};
++
+ /* Supported manual ISO values */
+ static const s64 iso_qmenu[] = {
+ 	/* COMM_ISO: 0x0001...0x0004 */
+@@ -444,7 +507,7 @@ int s5c73m3_init_controls(struct s5c73m3 *state)
+ 	struct s5c73m3_ctrls *ctrls = &state->ctrls;
+ 	struct v4l2_ctrl_handler *hdl = &ctrls->handler;
+ 
+-	int ret = v4l2_ctrl_handler_init(hdl, 22);
++	int ret = v4l2_ctrl_handler_init(hdl, 23);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -490,6 +553,10 @@ int s5c73m3_init_controls(struct s5c73m3 *state)
+ 			~(1 << V4L2_AUTO_FOCUS_RANGE_NORMAL |
+ 			  1 << V4L2_AUTO_FOCUS_RANGE_MACRO),
+ 			V4L2_AUTO_FOCUS_RANGE_NORMAL);
++
++	/* used by the next AF start, it doesn't touch the hardware itself */
++	ctrls->af_area = v4l2_ctrl_new_custom(hdl, &s5c73m3_af_area, NULL);
++
+ 	/* ISO sensitivity */
+ 	ctrls->auto_iso = v4l2_ctrl_new_std_menu(hdl, ops,
+ 			V4L2_CID_ISO_SENSITIVITY_AUTO, 1, 0,
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3.h b/drivers/media/i2c/s5c73m3/s5c73m3.h
+index 68a19c2c8..0c6580ec1 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3.h
++++ b/drivers/media/i2c/s5c73m3/s5c73m3.h
+@@ -338,6 +338,7 @@ struct s5c73m3_ctrls {
+ 		struct v4l2_ctrl *af_status;
+ 		struct v4l2_ctrl *af_distance;
+ 	};
++	struct v4l2_ctrl *af_area;
+ 
+ 	struct v4l2_ctrl *aaa_lock;
+ 	struct v4l2_ctrl *colorfx;
+@@ -401,6 +402,7 @@ struct s5c73m3 {
+ 	u8 apply_fmt:1;
+ 	u8 apply_fiv:1;
+ 	u8 isp_ready:1;
++	u8 af_touch:1;
+ 
+ 	short power;
+ 
+diff --git a/include/uapi/linux/v4l2-controls.h b/include/uapi/linux/v4l2-controls.h
+index affec0ab4..d6af36723 100644
+--- a/include/uapi/linux/v4l2-controls.h
++++ b/include/uapi/linux/v4l2-controls.h
+@@ -234,6 +234,19 @@ enum v4l2_colorfx {
+  */
+ #define V4L2_CID_USER_MALI_C55_BASE		(V4L2_CID_USER_BASE + 0x1230)
+ 
++/*
++ * The base for the Samsung S5C73M3 driver controls.
++ * We reserve 16 controls for this driver.
++ */
++#define V4L2_CID_USER_S5C73M3_BASE		(V4L2_CID_USER_BASE + 0x1240)
++
++/*
++ * The area an autofocus scan focuses on (touch AF), a struct v4l2_rect in
++ * pixels of the ISP's output frame. An area that covers the frame is the
++ * normal autofocus on the centre.
++ */
++#define V4L2_CID_S5C73M3_AF_AREA		(V4L2_CID_USER_S5C73M3_BASE + 0)
++
+ /* MPEG-class control IDs */
+ /* The MPEG controls are applicable to all codec controls
+  * and the 'MPEG' part of the define is historical */
+-- 
+2.53.0
+

@@ -9,30 +9,34 @@ written for this port.
 
 | | |
 |---|---|
-| Display, brightness, auto-brightness | works (EA8061 panel) |
+| Display, brightness, auto-brightness | works with the EA8061 panel. The other Note II panel, the S6EVR02, isn't supported yet: its device tree isn't in the boot image, so the screen stays black (the flash zip stops when TWRP reports that panel; check with `dmesg \| grep 'panel driver'` in TWRP) |
 | GPU | works: Mali-400 MP4 with Mesa lima (OpenGL ES 2), drm_hwcomposer, minigbm |
 | Touchscreen, S Pen, touch keys | work |
 | Audio | works (WM1811: speaker, headphones, microphone; capture runs at the playback rate of 44.1 kHz) |
-| Wi-Fi, Bluetooth | work (BCM4334) |
-| Modem | XMM6262 boots, baseband and IMEI are reported; calls, SMS and mobile data are untested (no SIM was at hand) |
+| Wi-Fi, Bluetooth | work (BCM4334); Wi-Fi stays connected in deep sleep and wakes the phone for traffic to it (the stock firmware has no WoWLAN: kernel patches 0121 and 0124 do it with packet filters) |
+| Modem | XMM6262 boots, baseband and IMEI are reported; calls, SMS and mobile data are untested (no SIM was at hand). In deep sleep the HSIC port loses its power; the modem attaches again on wake-up (kernel patch 0128), but every few minutes of sleep it still needs a reset (about 10 s offline) |
 | GPS | the BCM4752 runs and reports NMEA; a fix outdoors is not verified yet |
 | Sensors | work: accelerometer, gyroscope, magnetometer, barometer, light, proximity |
-| Rear camera | preview, photos up to 2304x1296 and video (software H.264 encoder: about 11 fps at 960x720 through CameraX); the autofocus doesn't move the lens |
-| Front camera | doesn't work: the FIMC-IS firmware from the stock ROM never opens the sensor; the mainline driver was written for the Tizen firmware, which isn't available (`device/samsung/n7100/camera/README.txt`) |
-| Charging, battery, standby | work, with deep sleep; a cable plugged into the switched-off phone boots Android (no charger UI) |
-| USB | adb, MTP; the gadget is gone while the phone is in deep sleep |
+| Rear camera | preview, photos up to 2304x1296 and video (software H.264 encoder: about 11 fps at 960x720 through CameraX); continuous autofocus and tap-to-focus (kernel patches 0119 and 0120) |
+| Flashlight, camera flash | the flash LED as a torch (quick settings tile, 8 brightness levels); camera apps get it as the torch and as the flash for photos (a continuous light at torch current, no strobe) |
+| Front camera | preview, photos and video up to 1280x720 (16:9, fixed focus), through the FIMC-IS ISP with the stock firmware (kernel patches 0107-0112, Martin Jücker's FIMC-IS fixes); colours are warm under room light (`device/samsung/n7100/camera/README.txt`) |
+| Charging, battery, standby | work, with deep sleep; the fuel gauge measures the voltage only (battery level, no current or charge counter); a cable plugged into the switched-off phone boots Android (no charger UI) |
+| Notification LED | works: notifications (with the screen off, as LineageOS does it) and the battery state, in colour; the LED blinks by itself, also in deep sleep |
+| USB | adb, file transfer (MTP/PTP over FunctionFS) and the USB settings (kernel patch 0106 gives Android its gadget state); the phone stays awake while a computer uses it (kernel patch 0118) |
+| Screen mirroring | scrcpy works (video and audio over adb) |
 | USB OTG | implemented (role switch through the MAX77693 MUIC, 5 V boost), untested |
 | NFC | not possible: the PN544 is an HCI chip, Android's NFC stack only speaks NCI |
 | Hardware video decoding | H.264 up to 1080p30 on the MFC v5, through v4l2_codec2 (Codec2) with a decoder for it; FIMC converts its tiled frames. Other codecs and all encoders are software |
 | Security | SELinux enforcing, file-based encryption (Adiantum: the Cortex-A9 has no AES instructions) |
+| Recovery | LineageOS recovery on the same kernel (adb sideload, reboot), two-stage to fit the 8 MiB partition; see [Installing](#lineageos-recovery) |
 
 CPU at 1.6 GHz (Prime operating points), GPU at 533 MHz, schedutil, a power HAL that raises
 CPU/GPU/memory bus floors on touch and app launches.
 
 ## Installing
 
-Needs TWRP in the recovery partition (3.7.0 tested) and the stock bootloader (sboot); the
-partition table stays Samsung's.
+Needs the stock bootloader (sboot) and, for the first installation, TWRP in the recovery
+partition (3.7.0 tested); the partition table stays Samsung's.
 
 1. Boot TWRP (Volume Up + Home + Power).
 2. Install `lineage-24.0-<date>-UNOFFICIAL-n7100.zip`. Coming from stock or LineageOS 21, the
@@ -41,6 +45,19 @@ partition table stays Samsung's.
 3. Reboot. The first boot takes a few minutes.
 
 No GApps are included.
+
+### LineageOS recovery
+
+With the ROM installed, `lineage-24.0-<date>-recovery-n7100.img` can replace TWRP: flash it to
+the recovery partition from TWRP (Install → Install Image → Recovery) or with Heimdall
+(`heimdall flash --RECOVERY <img>`). It installs zips with `adb sideload` (Apply update → Apply
+from ADB), checks their signature and reboots; there are no backups and no file manager.
+
+The recovery partition has 8 MiB: enough for the kernel, not for the recovery ramdisk next to it.
+So the image holds the kernel and a small loader (`device/samsung/n7100/recovery/loader.c`), and
+the ramdisk is in the vendor partition (`/vendor/etc/recovery/ramdisk.cpio`), where the loader
+unpacks it from. It only works with this ROM installed, and every later zip of the ROM updates
+it; a TWRP in the recovery partition stays.
 
 ## Building
 

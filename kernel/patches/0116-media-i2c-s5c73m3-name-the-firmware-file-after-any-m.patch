@@ -1,0 +1,35 @@
+From f782c2b9d55372772f17063101bf75f661c28425 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 01:12:30 +0100
+Subject: [PATCH 116/117] media: i2c: s5c73m3: name the firmware file after any
+ module letter
+
+The firmware file for SPI booting is SlimISP_<maker><module>.bin, from
+the first two letters of the firmware version in the module's F-ROM,
+but only the module letters C to F were taken over: those of the
+Galaxy S III. The Galaxy Note II's module reports GKFH93 and Samsung
+ships SlimISP_GK.bin for it, yet the driver asked for SlimISP_GC.bin.
+
+Take any upper-case letter.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/i2c/s5c73m3/s5c73m3-core.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3-core.c b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+index 551387cea..9de9ea9f3 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3-core.c
++++ b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+@@ -647,7 +647,7 @@ static void s5c73m3_set_fw_file_version(struct s5c73m3 *state)
+ 	}
+ 
+ 	switch (state->sensor_fw[1]) {
+-	case 'C'...'F':
++	case 'A'...'Z':
+ 		state->fw_file_version[1] = state->sensor_fw[1];
+ 		break;
+ 	}
+-- 
+2.53.0
+

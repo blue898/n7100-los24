@@ -1,0 +1,47 @@
+From 802be38f30e9e372bf4b87b96b2838fd6d48f740 Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Mon, 2 Nov 2026 08:07:20 +0100
+Subject: [PATCH 110/112] media: exynos4-is: fix return value of
+ fimc_lite_subdev_s_stream
+
+A successful stop returned the remaining jiffies of wait_event_timeout() as an error,
+leaving the stream marked as running.
+
+Taken from commit ea97feaa in https://gitlab.com/martin.juecker/linux (branch v7.1.1-exynos4-camera).
+Link: https://gitlab.com/exynos4-mainline/linux/-/merge_requests/28
+---
+ drivers/media/platform/samsung/exynos4-is/fimc-lite.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/platform/samsung/exynos4-is/fimc-lite.c b/drivers/media/platform/samsung/exynos4-is/fimc-lite.c
+index 8be20fd32..9474d66ae 100644
+--- a/drivers/media/platform/samsung/exynos4-is/fimc-lite.c
++++ b/drivers/media/platform/samsung/exynos4-is/fimc-lite.c
+@@ -1185,7 +1185,7 @@ static int fimc_lite_subdev_s_stream(struct v4l2_subdev *sd, int on)
+ {
+ 	struct fimc_lite *fimc = v4l2_get_subdevdata(sd);
+ 	unsigned long flags;
+-	int ret;
++	int ret = 0;
+ 
+ 	/*
+ 	 * Find sensor subdev linked to FIMC-LITE directly or through
+@@ -1215,11 +1215,11 @@ static int fimc_lite_subdev_s_stream(struct v4l2_subdev *sd, int on)
+ 		flite_hw_capture_stop(fimc);
+ 		spin_unlock_irqrestore(&fimc->slock, flags);
+ 
+-		ret = wait_event_timeout(fimc->irq_queue,
+-				!test_bit(ST_FLITE_OFF, &fimc->state),
+-				msecs_to_jiffies(200));
+-		if (ret == 0)
++		if (!wait_event_timeout(fimc->irq_queue,
++					!test_bit(ST_FLITE_OFF, &fimc->state),
++					msecs_to_jiffies(200)))
+ 			v4l2_err(sd, "s_stream(0) timeout\n");
++
+ 		clear_bit(ST_FLITE_RUN, &fimc->state);
+ 	}
+ 
+-- 
+2.53.0
+

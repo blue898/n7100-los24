@@ -1,0 +1,61 @@
+From 448f8a17ff253be96e4c6034116e33edb5b62eea Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Mon, 2 Nov 2026 08:07:20 +0100
+Subject: [PATCH 112/112] clk: samsung: exynos4412-isp: restore ISP bus clock
+ muxes on resume
+
+After the ISP power domain has been off, the ISP bus clock muxes are back on the 24 MHz
+oscillator while the clock framework still assumes their old parents, and the firmware
+fails with random errors and timeouts. Write the cached parents back on runtime resume.
+
+Taken from commit c076c909 in https://gitlab.com/martin.juecker/linux (branch v7.1.1-exynos4-camera).
+Link: https://gitlab.com/exynos4-mainline/linux/-/merge_requests/28
+---
+ drivers/clk/samsung/clk-exynos4412-isp.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/clk/samsung/clk-exynos4412-isp.c b/drivers/clk/samsung/clk-exynos4412-isp.c
+index 0e66f94ce..0e4c4b0d5 100644
+--- a/drivers/clk/samsung/clk-exynos4412-isp.c
++++ b/drivers/clk/samsung/clk-exynos4412-isp.c
+@@ -36,6 +36,29 @@ static const unsigned long exynos4x12_clk_isp_save[] __initconst = {
+ 	E4X12_GATE_ISP1,
+ };
+ 
++static const unsigned int exynos4x12_isp_mux_child_ids[] = {
++	CLK_ISP_DIV_ISP0,	/* parent: aclk200 */
++	CLK_ISP_DIV_MCUISP0,	/* parent: aclk400_mcuisp */
++};
++
++static void exynos4x12_isp_restore_parents(struct samsung_clk_provider *ctx)
++{
++	struct clk_hw *hw, *parent;
++	int i, index;
++
++	for (i = 0; i < ARRAY_SIZE(exynos4x12_isp_mux_child_ids); i++) {
++		hw = ctx->clk_data.hws[exynos4x12_isp_mux_child_ids[i]];
++		if (IS_ERR_OR_NULL(hw))
++			continue;
++		parent = clk_hw_get_parent(hw);
++		if (!parent)
++			continue;
++		index = clk_hw_get_parent_index(parent);
++		if (index >= 0)
++			clk_mux_ops.set_parent(parent, index);
++	}
++}
++
+ static struct samsung_div_clock exynos4x12_isp_div_clks[] = {
+ 	DIV(CLK_ISP_DIV_ISP0, "div_isp0", "aclk200", E4X12_DIV_ISP0, 0, 3),
+ 	DIV(CLK_ISP_DIV_ISP1, "div_isp1", "aclk200", E4X12_DIV_ISP0, 4, 3),
+@@ -104,6 +127,7 @@ static int __maybe_unused exynos4x12_isp_clk_resume(struct device *dev)
+ 
+ 	samsung_clk_restore(ctx->reg_base, NULL, exynos4x12_save_isp,
+ 			    ARRAY_SIZE(exynos4x12_clk_isp_save));
++	exynos4x12_isp_restore_parents(ctx);
+ 	return 0;
+ }
+ 
+-- 
+2.53.0
+

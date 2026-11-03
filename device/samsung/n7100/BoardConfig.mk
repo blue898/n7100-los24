@@ -17,8 +17,6 @@ TARGET_BOARD_PLATFORM := exynos4
 TARGET_BOOTLOADER_BOARD_NAME := n7100
 TARGET_NO_BOOTLOADER := true
 TARGET_NO_RADIOIMAGE := true
-# TWRP stays in the RECOVERY partition
-TARGET_NO_RECOVERY := true
 
 # Kernel: mainline 7.1 (exynos4-mainline) built outside the tree, zImage with the N7100
 # EA8061 DTB appended (Samsung's sboot has no DT support). Android's boot parameters are
@@ -32,6 +30,23 @@ BOARD_MKBOOTIMG_ARGS := --header_version $(BOARD_BOOT_HEADER_VERSION)
 # kernel + dtb take ~6.8 MiB of the 8 MiB BOOT partition
 BOARD_RAMDISK_USE_XZ := true
 BOARD_VENDOR_KERNEL_MODULES := $(wildcard $(DEVICE_PATH)/prebuilt/modules/*.ko)
+
+# Recovery: LineageOS recovery, two-stage (mkbootimg.mk). recovery.img holds the kernel and a
+# loader, the recovery ramdisk is in the vendor partition. Of its drivers only the keys' are
+# modules.
+BOARD_CUSTOM_BOOTIMG_MK := $(DEVICE_PATH)/mkbootimg.mk
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 8388608
+# The flash zip updates the recovery with the ROM only where it finds this name in the header
+BOARD_RECOVERY_MKBOOTIMG_ARGS := --header_version $(BOARD_BOOT_HEADER_VERSION) --board n7100-2stage
+BOARD_RECOVERY_KERNEL_MODULES := \
+    $(addprefix $(DEVICE_PATH)/prebuilt/modules/,gpio_keys.ko led-class.ko tm2-touchkey.ko)
+TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/rootdir/fstab.n7100
+# XRGB8888, which the FIMD scans out; without it minui allocates RGB565 buffers, draws 4 bytes
+# per pixel into them anyway and crashes
+TARGET_RECOVERY_PIXEL_FORMAT := BGRX_8888
+# Flash zips made for TWRP (ours too) run their update-binary with #!/sbin/sh
+BOARD_RECOVERY_IMAGE_PREPARE = \
+    mkdir -p $(TARGET_RECOVERY_ROOT_OUT)/sbin && ln -sf /system/bin/sh $(TARGET_RECOVERY_ROOT_OUT)/sbin/sh
 
 # Partitions (stock Samsung GPT: SYSTEM, HIDDEN as vendor, USERDATA)
 BOARD_FLASH_BLOCK_SIZE := 4096

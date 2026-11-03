@@ -6,3 +6,10 @@ genfscon sysfs /devices/platform/soc/13400000.codec/video4linux                 
 genfscon sysfs /devices/platform/soc/13860000.i2c/i2c-0/0-003c/video4linux              u:object_r:sysfs_video4linux:s0
 genfscon sysfs /devices/platform/soc/soc:camera@11800000/video4linux                    u:object_r:sysfs_video4linux:s0
 genfscon sysfs /devices/platform/soc/soc:camera@11800000/12000000.fimc-is/12140000.i2c-isp/i2c-16/16-0010/video4linux u:object_r:sysfs_video4linux:s0
+
+# The USB gadget's wakeup source (kernel patch 0118): system_suspend reads every wakeup source's
+# statistics
+genfscon sysfs /devices/virtual/android_usb/android0/wakeup                              u:object_r:sysfs_wakeup:s0
+
+# wlan0 (brcmfmac on SDIO function 1): netd sets its MTU
+genfscon sysfs /devices/platform/soc/12540000.mmc/mmc_host/mmc3/mmc3:0001/mmc3:0001:1/net u:object_r:sysfs_net:s0

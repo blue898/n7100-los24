@@ -2,8 +2,9 @@
 # Build LineageOS 24 for the GT-N7100 and package it:
 #   - applies patches/ to the LineageOS tree (once), builds n7100tool, puts the device tree into
 #     <lineage>/device/samsung/n7100
-#   - lunch lineage_n7100-<release>-userdebug, m bootimage systemimage vendorimage
-#   - exports raw images (gzip, size, sha1) to <out> and the TWRP flash zip next to them
+#   - lunch lineage_n7100-<release>-userdebug, m bootimage recoveryimage systemimage vendorimage
+#   - exports raw images (gzip, size, sha1) and recovery.img to <out>, and the flash zip (signed
+#     with the AOSP test key, for TWRP and LineageOS recovery) next to them
 #
 # usage: tools/build-android.sh <lineage> <out>
 #   lineage  a LineageOS lineage-24.0 tree (repo init -u https://github.com/LineageOS/android.git
@@ -62,12 +63,13 @@ set +u
 source build/envsetup.sh > /dev/null
 source vendor/lineage/vars/aosp_target_release
 lunch "lineage_n7100-${aosp_target_release}-userdebug"
-m bootimage systemimage vendorimage
+m bootimage recoveryimage systemimage vendorimage
 set -u
 
 mkdir -p "$O"
 PO=$L/out/target/product/n7100
 cp "$PO/boot.img" "$O/boot.img"
+cp "$PO/recovery.img" "$O/recovery.img"
 sha1sum "$O/boot.img" | cut -d' ' -f1 > "$O/boot.img.sha1"
 stat -c %s "$O/boot.img" > "$O/boot.img.size"
 for n in system vendor; do
@@ -80,4 +82,4 @@ for n in system vendor; do
     stat -c %s "$O/$n.raw" > "$O/$n.raw.size"
     gzip -1 -f "$O/$n.raw"
 done
-"$R/tools/make-flashzip.sh" "$O" "$O/lineage-24.0-$(date +%Y%m%d)-UNOFFICIAL-n7100.zip"
+LOS=$L "$R/tools/make-flashzip.sh" "$O" "$O/lineage-24.0-$(date +%Y%m%d)-UNOFFICIAL-n7100.zip"

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The wizard puts its footer buttons this far above the navigation bar. The Note II has
+         hardware keys and no navigation bar, so the default 8dp leaves the buttons at the edge
+         of the screen. 32dp matches the spacing on a device with gesture navigation. -->
+    <dimen name="sud_glif_expressive_footer_padding_bottom">32dp</dimen>
+</resources>

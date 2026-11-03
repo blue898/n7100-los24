@@ -1,0 +1,94 @@
+From 66744dcaf6379784bcd3bc5dc36c918cbcb46230 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Mon, 2 Nov 2026 22:43:56 +0100
+Subject: [PATCH 114/115] power: supply: max17042: hide the charge registers
+ without current sensing
+
+Without a sense resistor in the device tree the driver puts the gauge
+into voltage-only mode (CGAIN 0, MiscCFG 3): it reports the voltage
+based state of charge and hides CURRENT_NOW/CURRENT_AVG. The gauge
+then counts no charge, so FullCAP, DesignCap, RepCap, QH and Cycles
+keep their power-on defaults. On the Galaxy Note II (3100 mAh) user
+space read charge_full and charge_full_design as 1000 mAh,
+charge_now as 0, charge_counter as -500 uAh and a cycle count that
+is a percentage, and Android took 1000 mAh for the battery capacity.
+
+Hide those properties along with the currents, as for TTE/TTF, which
+need the current as well.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/max17042_battery.c | 24 +++++++++++++++---------
+ 1 file changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
+index dc6b106cb..fa80068f7 100644
+--- a/drivers/power/supply/max17042_battery.c
++++ b/drivers/power/supply/max17042_battery.c
+@@ -99,7 +99,6 @@ static enum power_supply_property max17042_battery_props[] = {
+ 	POWER_SUPPLY_PROP_STATUS,
+ 	POWER_SUPPLY_PROP_PRESENT,
+ 	POWER_SUPPLY_PROP_TECHNOLOGY,
+-	POWER_SUPPLY_PROP_CYCLE_COUNT,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MIN,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
+@@ -107,10 +106,6 @@ static enum power_supply_property max17042_battery_props[] = {
+ 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
+ 	POWER_SUPPLY_PROP_VOLTAGE_OCV,
+ 	POWER_SUPPLY_PROP_CAPACITY,
+-	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+-	POWER_SUPPLY_PROP_CHARGE_FULL,
+-	POWER_SUPPLY_PROP_CHARGE_NOW,
+-	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+ 	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
+ 	POWER_SUPPLY_PROP_TEMP,
+ 	POWER_SUPPLY_PROP_TEMP_ALERT_MIN,
+@@ -119,12 +114,22 @@ static enum power_supply_property max17042_battery_props[] = {
+ 	POWER_SUPPLY_PROP_TEMP_MAX,
+ 	POWER_SUPPLY_PROP_HEALTH,
+ 	POWER_SUPPLY_PROP_SCOPE,
++	/*
++	 * These have to be at the end of the list: without current sensing the
++	 * gauge doesn't count charge, so its capacity, charge and cycle
++	 * registers keep their power-on defaults and aren't reported.
++	 */
++	POWER_SUPPLY_PROP_CYCLE_COUNT,
++	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
++	POWER_SUPPLY_PROP_CHARGE_FULL,
++	POWER_SUPPLY_PROP_CHARGE_NOW,
++	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+ 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
+ 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
+-	// these two have to be at the end on the list
+ 	POWER_SUPPLY_PROP_CURRENT_NOW,
+ 	POWER_SUPPLY_PROP_CURRENT_AVG,
+ };
++#define MAX17042_CURRENT_SENSE_PROPS	9
+ 
+ static int max17042_get_temperature(struct max17042_chip *chip, int *temp)
+ {
+@@ -1429,7 +1434,8 @@ static const struct power_supply_desc max17042_no_current_sense_psy_desc = {
+ 	.property_is_writeable	= max17042_property_is_writeable,
+ 	.init		= max17042_init_battery,
+ 	.properties	= max17042_battery_props,
+-	.num_properties	= ARRAY_SIZE(max17042_battery_props) - 2,
++	.num_properties	= ARRAY_SIZE(max17042_battery_props) -
++			  MAX17042_CURRENT_SENSE_PROPS,
+ };
+ 
+ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq,
+@@ -1481,8 +1487,8 @@ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq
+ 	psy_cfg.drv_data = chip;
+ 	psy_cfg.fwnode = dev_fwnode(dev);
+ 
+-	/* When current is not measured,
+-	 * CURRENT_NOW and CURRENT_AVG properties should be invisible. */
++	/* When current is not measured, the properties based on it should be
++	 * invisible. */
+ 	if (!chip->enable_current_sense)
+ 		max17042_desc = &max17042_no_current_sense_psy_desc;
+ 
+-- 
+2.53.0
+

@@ -1,0 +1,129 @@
+From f75665cbc94a9d23bd80e38e2b79e4915bb5325c Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 11:57:34 +0100
+Subject: [PATCH 128/128] HACK: usb: host: ehci-exynos: let the HSIC modem
+ attach again after suspend
+
+The HSIC port loses its power in system suspend. Samsung's s5p-ehci
+told the modem: ACTIVE_STATE low once the port was off, high again on
+resume, and then it waited up to 300 ms for the CP to attach before the
+root hub went on. Without that the root hub found an empty port; the
+link came back only through modem_if's reconnect attempts, and every
+few suspends they failed and the CP got a silent reset (about 10 s
+without network).
+
+Do the same through a notifier the modem driver registers, waiting for
+the connection on the CP's port (HSIC0, port 2).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/misc/modem_if/modem_main.c |  9 ++++++
+ drivers/usb/host/ehci-exynos.c     | 44 ++++++++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+)
+
+diff --git a/drivers/misc/modem_if/modem_main.c b/drivers/misc/modem_if/modem_main.c
+index f980c5868..7c97edf91 100755
+--- a/drivers/misc/modem_if/modem_main.c
++++ b/drivers/misc/modem_if/modem_main.c
+@@ -434,6 +434,14 @@ static int attach_devices(struct io_device *iod, enum modem_link tx_link)
+ 	return 0;
+ }
+ 
++/* exynos-ehci tells the CP about system suspend through this (its ehci_power hack) */
++void exynos_ehci_set_host_notify(void (*notify)(int on));
++
++static void modem_host_notify(int on)
++{
++	set_host_states(on);
++}
++
+ static int modem_probe(struct platform_device *pdev)
+ {
+ 	int i, ret;
+@@ -485,6 +493,7 @@ static int modem_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	platform_set_drvdata(pdev, modemctl);
++	exynos_ehci_set_host_notify(modem_host_notify);
+ 
+ 	mif_info("Complete!!!\n");
+ 	return 0;
+diff --git a/drivers/usb/host/ehci-exynos.c b/drivers/usb/host/ehci-exynos.c
+index 6ba005277..ca6882fe4 100644
+--- a/drivers/usb/host/ehci-exynos.c
++++ b/drivers/usb/host/ehci-exynos.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <linux/clk.h>
++#include <linux/delay.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/io.h>
+ #include <linux/kernel.h>
+@@ -328,6 +329,41 @@ static void exynos_ehci_remove(struct platform_device *pdev)
+ 	usb_put_hcd(hcd);
+ }
+ 
++#ifdef UGLY_HACK
++/*
++ * The modem on the HSIC port (modem_if, XMM6262) has to know that the port
++ * loses its power in system suspend, as Samsung's s5p-ehci told it: its
++ * ACTIVE_STATE goes low once the port is off, and high again on resume,
++ * after which the CP attaches within ~300 ms. Waiting for that here, before
++ * the root hub resumes, keeps the link: the root hub finds the CP instead of
++ * an empty port, which ended in reconnect attempts and silent CP resets.
++ */
++#define EXYNOS_EHCI_CP_PORT	2	/* HSIC0 */
++
++static void (*exynos_ehci_host_notify)(int on);
++
++void exynos_ehci_set_host_notify(void (*notify)(int on));
++void exynos_ehci_set_host_notify(void (*notify)(int on))
++{
++	exynos_ehci_host_notify = notify;
++}
++EXPORT_SYMBOL_GPL(exynos_ehci_set_host_notify);
++
++static void exynos_ehci_wait_for_cp(struct usb_hcd *hcd)
++{
++	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
++	u32 __iomem *portsc = &ehci->regs->port_status[EXYNOS_EHCI_CP_PORT - 1];
++	int i;
++
++	exynos_ehci_host_notify(1);
++	for (i = 0; i < 30 && !(ehci_readl(ehci, portsc) & PORT_CONNECT); i++)
++		msleep(10);
++	if (!(ehci_readl(ehci, portsc) & PORT_CONNECT))
++		dev_info(hcd->self.controller, "CP not attached after resume, portsc %#x\n",
++			 ehci_readl(ehci, portsc));
++}
++#endif
++
+ static int exynos_ehci_suspend(struct device *dev)
+ {
+ 	struct usb_hcd *hcd = dev_get_drvdata(dev);
+@@ -352,6 +388,10 @@ static int exynos_ehci_suspend(struct device *dev)
+ 		return rc;
+ 
+ 	exynos_ehci_phy_disable(dev);
++#ifdef UGLY_HACK
++	if (exynos_ehci_host_notify)
++		exynos_ehci_host_notify(0);
++#endif
+ 
+ 	clk_disable_unprepare(exynos_ehci->clk);
+ 
+@@ -384,6 +424,10 @@ static int exynos_ehci_resume(struct device *dev)
+ 	writel(EHCI_INSNREG00_ENABLE_DMA_BURST, EHCI_INSNREG00(hcd->regs));
+ 
+ 	ehci_resume(hcd, false);
++#ifdef UGLY_HACK
++	if (exynos_ehci_host_notify)
++		exynos_ehci_wait_for_cp(hcd);
++#endif
+ 	return 0;
+ }
+ 
+-- 
+2.53.0
+

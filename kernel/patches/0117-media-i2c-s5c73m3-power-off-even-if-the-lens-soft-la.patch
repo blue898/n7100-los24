@@ -1,0 +1,41 @@
+From 167a964fd25f3095343bd067c3476ef12aa9e800 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 01:14:55 +0100
+Subject: [PATCH 117/117] media: i2c: s5c73m3: power off even if the lens soft
+ landing fails
+
+When the soft landing of the lens failed, the OIF subdevice stayed
+powered and its power count unchanged. With an ISP that doesn't answer
+(a failed SPI boot, for one) the landing fails every time, so the
+module was never powered off again, and every later open skipped the
+ISP boot: the camera stayed dead until a reboot.
+
+Report the failed landing and power off anyway.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/i2c/s5c73m3/s5c73m3-core.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3-core.c b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+index 9de9ea9f3..8a6a655be 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3-core.c
++++ b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+@@ -1448,11 +1448,10 @@ static int s5c73m3_oif_set_power(struct v4l2_subdev *sd, int on)
+ 			state->apply_fmt = 1;
+ 		}
+ 	} else if (state->power == !on) {
+-		ret = s5c73m3_set_af_softlanding(state);
+-		if (!ret)
+-			ret = __s5c73m3_power_off(state);
+-		else
++		/* A stuck ISP would never be booted again otherwise */
++		if (s5c73m3_set_af_softlanding(state))
+ 			v4l2_err(sd, "Soft landing lens failed\n");
++		ret = __s5c73m3_power_off(state);
+ 	}
+ 	if (!ret)
+ 		state->power += on ? 1 : -1;
+-- 
+2.53.0
+

@@ -1,0 +1,64 @@
+From 3e26b99412f405d086f1f31a45493472fd5460f5 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 09:56:19 +0100
+Subject: [PATCH 125/128] misc: modem_if: start runtime PM once the link is up
+ after a reconnect
+
+After a system suspend the EHCI has lost its power and the CP's link
+comes back through a reconnect, which probes the interfaces one after
+the other. link_pm_start, queued by the first one, could run before the
+link counted as connected; it then returned for good. Runtime PM of the
+CP's USB device stayed forbidden, the link never went to L2, and the
+l2_hsic wakelock blocked every system suspend from then on.
+
+Retry for up to 10 s while the CP is online but the link isn't up yet.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/misc/modem_if/modem_link_device_hsic.c | 15 ++++++++++++++-
+ drivers/misc/modem_if/modem_link_device_hsic.h |  1 +
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/misc/modem_if/modem_link_device_hsic.c b/drivers/misc/modem_if/modem_link_device_hsic.c
+index 4573faed6..d1c9b9de3 100755
+--- a/drivers/misc/modem_if/modem_link_device_hsic.c
++++ b/drivers/misc/modem_if/modem_link_device_hsic.c
+@@ -639,9 +639,22 @@ static void link_pm_runtime_start(struct work_struct *work)
+ 
+ 	if (!pm_data->usb_ld->if_usb_connected
+ 		|| pm_data->usb_ld->ld.com_state == COM_NONE) {
+-		mif_debug("disconnect status, ignore\n");
++		/*
++		 * A reconnect after a suspend probes the interfaces one after
++		 * the other, and this can run before the link is up: without a
++		 * retry runtime PM stayed off, the link never got to L2 and its
++		 * wakelock blocked system suspend for good.
++		 */
++		if (pm_data->usb_ld->ld.com_state != COM_NONE &&
++		    pm_data->link_pm_start_retries++ < 50) {
++			queue_delayed_work(pm_data->wq, &pm_data->link_pm_start,
++					   msecs_to_jiffies(200));
++			return;
++		}
++		mif_info("link not up, runtime PM stays off\n");
+ 		return;
+ 	}
++	pm_data->link_pm_start_retries = 0;
+ 
+ 	dev = &pm_data->usb_ld->usbdev->dev;
+ 
+diff --git a/drivers/misc/modem_if/modem_link_device_hsic.h b/drivers/misc/modem_if/modem_link_device_hsic.h
+index 604b06784..fb8d894c4 100755
+--- a/drivers/misc/modem_if/modem_link_device_hsic.h
++++ b/drivers/misc/modem_if/modem_link_device_hsic.h
+@@ -87,6 +87,7 @@ struct link_pm_data {
+ 	struct completion active_done;
+ 	struct delayed_work link_pm_work;
+ 	struct delayed_work link_pm_start;
++	int link_pm_start_retries;
+ 	struct delayed_work link_reconnect_work;
+ 	bool resume_requested;
+ 	bool link_pm_active;
+-- 
+2.53.0
+

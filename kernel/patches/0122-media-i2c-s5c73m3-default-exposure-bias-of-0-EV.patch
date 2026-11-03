@@ -1,0 +1,30 @@
+From 82affb86f913f32ce96428c27afa48ff94de7e4e Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 08:11:49 +0100
+Subject: [PATCH 122/128] media: i2c: s5c73m3: default exposure bias of 0 EV
+
+The integer menu runs from -2 EV to +2 EV in nine steps, so 0 EV is
+index 4. The default was index 3, -0.5 EV: every stream started
+half a stop too dark until something set the control.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c b/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c
+index 4c9184f64..623db4d8c 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c
++++ b/drivers/media/i2c/s5c73m3/s5c73m3-ctrls.c
+@@ -523,7 +523,7 @@ int s5c73m3_init_controls(struct s5c73m3 *state)
+ 	ctrls->exposure_bias = v4l2_ctrl_new_int_menu(hdl, ops,
+ 			V4L2_CID_AUTO_EXPOSURE_BIAS,
+ 			ARRAY_SIZE(ev_bias_qmenu) - 1,
+-			ARRAY_SIZE(ev_bias_qmenu)/2 - 1,
++			ARRAY_SIZE(ev_bias_qmenu)/2,
+ 			ev_bias_qmenu);
+ 
+ 	ctrls->exposure_metering = v4l2_ctrl_new_std_menu(hdl, ops,
+-- 
+2.53.0
+

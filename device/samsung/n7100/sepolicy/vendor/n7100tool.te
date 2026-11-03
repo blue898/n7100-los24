@@ -2,6 +2,10 @@
 type n7100tool, domain;
 type n7100tool_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(n7100tool)
+# also in the recovery (init.recovery.n7100.rc), whose files are labeled rootfs
+recovery_only(`
+  domain_trans(init, rootfs, n7100tool)
+')
 
 allow n7100tool watchdog_device:chr_file rw_file_perms;
 allow n7100tool kmsg_device:chr_file w_file_perms;

@@ -1,0 +1,36 @@
+From 07029b77bca3c4b6654e90d0735fdf2b1eecc88e Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Mon, 2 Nov 2026 08:07:20 +0100
+Subject: [PATCH 109/112] media: exynos4-is: stop started subdevs before
+ power-off on stream error
+
+When starting a subdev fails, stop only the subdevs that were started, in reverse order,
+before powering the pipeline off; stopping an unclocked block can hang the system.
+
+Taken from commit d4df333c in https://gitlab.com/martin.juecker/linux (branch v7.1.1-exynos4-camera).
+Link: https://gitlab.com/exynos4-mainline/linux/-/merge_requests/28
+---
+ drivers/media/platform/samsung/exynos4-is/media-dev.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/samsung/exynos4-is/media-dev.c b/drivers/media/platform/samsung/exynos4-is/media-dev.c
+index 2e08c4435..cc220609f 100644
+--- a/drivers/media/platform/samsung/exynos4-is/media-dev.c
++++ b/drivers/media/platform/samsung/exynos4-is/media-dev.c
+@@ -353,11 +353,11 @@ static int __fimc_pipeline_s_stream(struct exynos_media_pipeline *ep, bool on)
+ 
+ 	return 0;
+ error:
+-	fimc_pipeline_s_power(p, !on);
+-	for (; i >= 0; i--) {
++	for (i--; i >= 0; i--) {
+ 		unsigned int idx = seq[on][i];
+ 		v4l2_subdev_call(p->subdevs[idx], video, s_stream, !on);
+ 	}
++	fimc_pipeline_s_power(p, !on);
+ 	return ret;
+ }
+ 
+-- 
+2.53.0
+

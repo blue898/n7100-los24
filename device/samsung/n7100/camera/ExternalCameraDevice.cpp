@@ -124,6 +124,12 @@ ndk::ScopedAStatus ExternalCameraDevice::open(
         return fromStatus(Status::CAMERA_IN_USE);
     }
 
+    // Links and the formats the first open powers the pipeline with
+    if (mPipeline->prepare() != 0) {
+        ALOGE("%s: media pipeline of camera %s can't be set up", __FUNCTION__, mCameraId.c_str());
+        return fromStatus(Status::INTERNAL_ERROR);
+    }
+
     int numAttempt = 0;
     unique_fd fd(::open(mDevicePath.c_str(), O_RDWR));
     while (fd.get() < 0 && numAttempt < MAX_RETRY) {
@@ -155,6 +161,10 @@ ndk::ScopedAStatus ExternalCameraDevice::open(
 
     mSession = session;
     *_aidl_return = session;
+    // The open camera owns the flash: torch mode goes off, FLASH_MODE_TORCH lights it
+    if (N7100Torch* torch = N7100Torch::get(mPipeline->info())) {
+        torch->opened();
+    }
     return fromStatus(Status::OK);
 }
 
@@ -163,16 +173,32 @@ ndk::ScopedAStatus ExternalCameraDevice::openInjectionSession(
     return fromStatus(Status::OPERATION_NOT_SUPPORTED);
 }
 
-ndk::ScopedAStatus ExternalCameraDevice::setTorchMode(bool) {
-    return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+ndk::ScopedAStatus ExternalCameraDevice::setTorchMode(bool on) {
+    N7100Torch* torch = N7100Torch::get(mPipeline->info());
+    if (torch == nullptr) {
+        return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+    }
+    return fromStatus(torch->set(on, 0) == 0 ? Status::OK : Status::CAMERA_IN_USE);
 }
 
-ndk::ScopedAStatus ExternalCameraDevice::turnOnTorchWithStrengthLevel(int32_t) {
-    return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+ndk::ScopedAStatus ExternalCameraDevice::turnOnTorchWithStrengthLevel(int32_t level) {
+    N7100Torch* torch = N7100Torch::get(mPipeline->info());
+    if (torch == nullptr) {
+        return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+    }
+    if (level < 1 || level > torch->maxLevel()) {
+        return fromStatus(Status::ILLEGAL_ARGUMENT);
+    }
+    return fromStatus(torch->set(true, level) == 0 ? Status::OK : Status::CAMERA_IN_USE);
 }
 
-ndk::ScopedAStatus ExternalCameraDevice::getTorchStrengthLevel(int32_t*) {
-    return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+ndk::ScopedAStatus ExternalCameraDevice::getTorchStrengthLevel(int32_t* level) {
+    N7100Torch* torch = N7100Torch::get(mPipeline->info());
+    if (torch == nullptr) {
+        return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+    }
+    *level = torch->level();
+    return fromStatus(Status::OK);
 }
 
 std::shared_ptr<ExternalCameraDeviceSession> ExternalCameraDevice::createSession(
@@ -364,7 +390,7 @@ status_t ExternalCameraDevice::initDefaultCharsKeys(
     const uint8_t antibandingMode = ANDROID_CONTROL_AE_ANTIBANDING_MODE_AUTO;
     UPDATE(ANDROID_CONTROL_AE_AVAILABLE_ANTIBANDING_MODES, &antibandingMode, 1);
 
-    // One AF region, so apps send tap-to-focus at all; the sensor always focuses on the centre
+    // One AF region: the point a single AF scan focuses on (tap-to-focus)
     const int32_t controlMaxRegions[] = {/*AE*/ 0, /*AWB*/ 0, /*AF*/ 1};
     UPDATE(ANDROID_CONTROL_MAX_REGIONS, controlMaxRegions, ARRAY_SIZE(controlMaxRegions));
 
@@ -374,8 +400,12 @@ status_t ExternalCameraDevice::initDefaultCharsKeys(
     const uint8_t awbAvailableMode = ANDROID_CONTROL_AWB_MODE_AUTO;
     UPDATE(ANDROID_CONTROL_AWB_AVAILABLE_MODES, &awbAvailableMode, 1);
 
-    const uint8_t aeAvailableMode = ANDROID_CONTROL_AE_MODE_ON;
-    UPDATE(ANDROID_CONTROL_AE_AVAILABLE_MODES, &aeAvailableMode, 1);
+    // With a flash LED, the torch is the flash for stills (ExternalCameraDeviceSession)
+    const uint8_t aeAvailableModes[] = {ANDROID_CONTROL_AE_MODE_ON,
+                                        ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH,
+                                        ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH};
+    UPDATE(ANDROID_CONTROL_AE_AVAILABLE_MODES, aeAvailableModes,
+           N7100Torch::get(mPipeline->info()) ? ARRAY_SIZE(aeAvailableModes) : 1);
 
     const uint8_t availableFffect = ANDROID_CONTROL_EFFECT_MODE_OFF;
     UPDATE(ANDROID_CONTROL_AVAILABLE_EFFECTS, &availableFffect, 1);
@@ -388,9 +418,19 @@ status_t ExternalCameraDevice::initDefaultCharsKeys(
     const uint8_t edgeMode = ANDROID_EDGE_MODE_OFF;
     UPDATE(ANDROID_EDGE_AVAILABLE_EDGE_MODES, &edgeMode, 1);
 
-    // android.flash
-    const uint8_t flashInfo = ANDROID_FLASH_INFO_AVAILABLE_FALSE;
+    // android.flash: the LED as a torch (torch mode, FLASH_MODE_TORCH) and as the flash
+    N7100Torch* torch = N7100Torch::get(mPipeline->info());
+    const uint8_t flashInfo =
+            torch ? ANDROID_FLASH_INFO_AVAILABLE_TRUE : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
     UPDATE(ANDROID_FLASH_INFO_AVAILABLE, &flashInfo, 1);
+    std::vector<int32_t> characteristicsKeys = AVAILABLE_CHARACTERISTICS_KEYS;
+    if (torch) {
+        const int32_t torchLevels = torch->maxLevel();
+        UPDATE(ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL, &torchLevels, 1);
+        UPDATE(ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL, &torchLevels, 1);
+        characteristicsKeys.push_back(ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
+        characteristicsKeys.push_back(ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL);
+    }
 
     // android.hotPixel
     const uint8_t hotPixelMode = ANDROID_HOT_PIXEL_MODE_OFF;
@@ -581,8 +621,8 @@ status_t ExternalCameraDevice::initDefaultCharsKeys(
     UPDATE(ANDROID_REQUEST_AVAILABLE_RESULT_KEYS, availableResultKeys,
            ARRAY_SIZE(availableResultKeys));
 
-    UPDATE(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, AVAILABLE_CHARACTERISTICS_KEYS.data(),
-           AVAILABLE_CHARACTERISTICS_KEYS.size());
+    UPDATE(ANDROID_REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, characteristicsKeys.data(),
+           characteristicsKeys.size());
 
     return OK;
 }
@@ -597,18 +637,26 @@ status_t ExternalCameraDevice::initCameraControlsCharsKeys(
     // android.lens.info.availableFocalLengths -> not available?
 
     // android.control
-    // No AE compensation support for now.
-    // TODO: V4L2_CID_EXPOSURE_BIAS
-    const int32_t controlAeCompensationRange[] = {0, 0};
+    // AE compensation: the sensor's AE bias, -2..2 EV in 1/2 EV steps
+    const bool bias = mPipeline->info().exposureBias;
+    const int32_t controlAeCompensationRange[] = {bias ? -4 : 0, bias ? 4 : 0};
     UPDATE(ANDROID_CONTROL_AE_COMPENSATION_RANGE, controlAeCompensationRange,
            ARRAY_SIZE(controlAeCompensationRange));
-    const camera_metadata_rational_t controlAeCompensationStep[] = {{0, 1}};
+    const camera_metadata_rational_t controlAeCompensationStep[] = {{bias ? 1 : 0, bias ? 2 : 1}};
     UPDATE(ANDROID_CONTROL_AE_COMPENSATION_STEP, controlAeCompensationStep,
            ARRAY_SIZE(controlAeCompensationStep));
 
-    // TODO: Check V4L2_CID_AUTO_FOCUS_*.
-    const uint8_t afAvailableModes[] = {ANDROID_CONTROL_AF_MODE_AUTO, ANDROID_CONTROL_AF_MODE_OFF};
-    UPDATE(ANDROID_CONTROL_AF_AVAILABLE_MODES, afAvailableModes, ARRAY_SIZE(afAvailableModes));
+    // Single AF scans on the sensor (the session's AF trigger) and its continuous AF, or a
+    // fixed-focus lens
+    const uint8_t afAvailableModes[] = {ANDROID_CONTROL_AF_MODE_AUTO,
+                                        ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                                        ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO,
+                                        ANDROID_CONTROL_AF_MODE_OFF};
+    if (mPipeline->info().autofocus) {
+        UPDATE(ANDROID_CONTROL_AF_AVAILABLE_MODES, afAvailableModes, ARRAY_SIZE(afAvailableModes));
+    } else {
+        UPDATE(ANDROID_CONTROL_AF_AVAILABLE_MODES, &afAvailableModes[3], 1);
+    }
 
     // TODO: V4L2_CID_SCENE_MODE
     const uint8_t availableSceneMode = ANDROID_CONTROL_SCENE_MODE_DISABLED;

@@ -1,0 +1,56 @@
+From 62e1ef2f77975f998f7eec5fc44013458e596f0a Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 11:11:25 +0100
+Subject: [PATCH 127/128] HACK: usb: host: ehci-exynos: leave a powered-off
+ EHCI alone in suspend
+
+The modem's boot daemon powers the EHCI off through ehci_power around a
+CP reset. A system suspend in that window turned the PHYs off a second
+time, which unbalanced their power count; the next "power on" failed
+with "can't setup: -110" and the modem stayed offline until a reboot.
+
+Like Samsung's s5p-ehci, do nothing in system suspend and resume while
+the EHCI is powered off.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/usb/host/ehci-exynos.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/drivers/usb/host/ehci-exynos.c b/drivers/usb/host/ehci-exynos.c
+index cf5d4225f..6ba005277 100644
+--- a/drivers/usb/host/ehci-exynos.c
++++ b/drivers/usb/host/ehci-exynos.c
+@@ -336,6 +336,17 @@ static int exynos_ehci_suspend(struct device *dev)
+ 	bool do_wakeup = device_may_wakeup(dev);
+ 	int rc;
+ 
++#ifdef UGLY_HACK
++	/*
++	 * Powered off through ehci_power (the modem's boot daemon, around a CP
++	 * reset): no HCD, the PHYs are off already. Turning them off again
++	 * unbalanced their power count, and powering on through ehci_power
++	 * later failed with "can't setup: -110", the modem gone until a reboot.
++	 */
++	if (!exynos_ehci->power_on)
++		return 0;
++#endif
++
+ 	rc = ehci_suspend(hcd, do_wakeup);
+ 	if (rc)
+ 		return rc;
+@@ -353,6 +364,11 @@ static int exynos_ehci_resume(struct device *dev)
+ 	struct exynos_ehci_hcd *exynos_ehci = to_exynos_ehci(hcd);
+ 	int ret;
+ 
++#ifdef UGLY_HACK
++	if (!exynos_ehci->power_on)
++		return 0;
++#endif
++
+ 	ret = clk_prepare_enable(exynos_ehci->clk);
+ 	if (ret)
+ 		return ret;
+-- 
+2.53.0
+

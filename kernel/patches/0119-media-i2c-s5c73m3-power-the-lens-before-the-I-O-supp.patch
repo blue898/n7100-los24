@@ -1,0 +1,55 @@
+From c84869d45d55ac3e10a83cb4fd90f34a07662a47 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 07:05:42 +0100
+Subject: [PATCH 119/128] media: i2c: s5c73m3: power the lens before the I/O
+ supplies
+
+On the Galaxy Note II (GT-N7100) the autofocus never moved the lens:
+every scan ended in "failed" and the picture stayed at the lens' rest
+position, blurred for anything close. Firmware, boot path (SPI or the
+module's flash) and the AF supply itself were fine.
+
+The driver enables its supplies in table order, which put the lens
+supply (vdd-af) last, after the sensor I/O supplies. Samsung's board
+code powers the lens before them. Moving only vdd-af ahead of
+vddio-host and vddio-cis is enough: the scans then report "reached"
+and the picture is sharp, also without the vendor's delays. Delaying
+the clock and the ISP start by 10 ms with the old order doesn't help.
+
+Reorder the table, which also turns the lens off after the I/O
+supplies.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/i2c/s5c73m3/s5c73m3-core.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/s5c73m3/s5c73m3-core.c b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+index 8a6a655be..f89cd9efd 100644
+--- a/drivers/media/i2c/s5c73m3/s5c73m3-core.c
++++ b/drivers/media/i2c/s5c73m3/s5c73m3-core.c
+@@ -43,15 +43,20 @@ module_param(update_fw, int, 0644);
+ #define S5C73M3_MIPI_DATA_LANES		4
+ #define S5C73M3_CLK_NAME		"cis_extclk"
+ 
++/*
++ * In power-on order, power-off is the reverse. The lens supply comes before
++ * the I/O supplies, as in the vendor's board code: powered after them, the
++ * lens actuator never moves and every autofocus scan fails.
++ */
+ static const char * const s5c73m3_supply_names[S5C73M3_MAX_SUPPLIES] = {
+ 	"vdd-int",	/* Digital Core supply (1.2V), CAM_ISP_CORE_1.2V */
+ 	"vdda",		/* Analog Core supply (1.2V), CAM_SENSOR_CORE_1.2V */
+ 	"vdd-reg",	/* Regulator input supply (2.8V), CAM_SENSOR_A2.8V */
++	"vdd-af",	/* Lens, CAM_AF_2.8V */
+ 	"vddio-host",	/* Digital Host I/O power supply (1.8V...2.8V),
+ 			   CAM_ISP_SENSOR_1.8V */
+ 	"vddio-cis",	/* Digital CIS I/O power (1.2V...1.8V),
+ 			   CAM_ISP_MIPI_1.2V */
+-	"vdd-af",	/* Lens, CAM_AF_2.8V */
+ };
+ 
+ static const struct s5c73m3_frame_size s5c73m3_isp_resolutions[] = {
+-- 
+2.53.0
+

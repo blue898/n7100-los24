@@ -1,0 +1,13 @@
+// Two-stage recovery: the loader is the ramdisk of recovery.img (mkbootimg.mk) and unpacks the
+// recovery ramdisk from the vendor partition (loader.c). mkbootimg.mk takes it from the
+// recovery's /system/bin; run there, it only refuses to do anything.
+cc_binary {
+    name: "n7100_recovery_loader",
+    recovery: true,
+    static_executable: true,
+    srcs: ["loader.c"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+}

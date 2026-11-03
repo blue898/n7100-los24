@@ -1,0 +1,47 @@
+From 2f41ef9c2aafc85700779673f42083a17aaa8cf9 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 09:08:35 +0100
+Subject: [PATCH 123/128] media: s5p-mfc: add VIDIOC_TRY_ENCODER_CMD
+
+The encoder handles V4L2_ENC_CMD_STOP, but without VIDIOC_TRY_ENCODER_CMD
+userspace can't find that out: Android's V4L2 Codec2 encoder asks with
+it and gives up on a device that can't be drained.
+
+Accept what vidioc_encoder_cmd() accepts: V4L2_ENC_CMD_STOP without
+flags.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/platform/samsung/s5p-mfc/s5p_mfc_enc.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_enc.c b/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_enc.c
+index 3f8701e56..84eca605b 100644
+--- a/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_enc.c
++++ b/drivers/media/platform/samsung/s5p-mfc/s5p_mfc_enc.c
+@@ -2315,6 +2315,14 @@ static int vidioc_g_parm(struct file *file, void *priv,
+ 	return 0;
+ }
+ 
++static int vidioc_try_encoder_cmd(struct file *file, void *priv,
++				  struct v4l2_encoder_cmd *cmd)
++{
++	if (cmd->cmd != V4L2_ENC_CMD_STOP || cmd->flags != 0)
++		return -EINVAL;
++	return 0;
++}
++
+ static int vidioc_encoder_cmd(struct file *file, void *priv,
+ 			      struct v4l2_encoder_cmd *cmd)
+ {
+@@ -2387,6 +2395,7 @@ static const struct v4l2_ioctl_ops s5p_mfc_enc_ioctl_ops = {
+ 	.vidioc_streamoff = vidioc_streamoff,
+ 	.vidioc_s_parm = vidioc_s_parm,
+ 	.vidioc_g_parm = vidioc_g_parm,
++	.vidioc_try_encoder_cmd = vidioc_try_encoder_cmd,
+ 	.vidioc_encoder_cmd = vidioc_encoder_cmd,
+ 	.vidioc_subscribe_event = vidioc_subscribe_event,
+ 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
+-- 
+2.53.0
+

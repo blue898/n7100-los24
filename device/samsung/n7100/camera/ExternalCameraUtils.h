@@ -217,6 +217,7 @@ struct HalRequest {
     std::shared_ptr<Frame> frameIn;
     nsecs_t shutterTs;
     std::vector<HalStreamBuffer> buffers;
+    int luma = -1;  // mean luma of the frame (0-255), -1 if not measured
 };
 
 static const uint64_t BUFFER_ID_NO_BUFFER = 0;

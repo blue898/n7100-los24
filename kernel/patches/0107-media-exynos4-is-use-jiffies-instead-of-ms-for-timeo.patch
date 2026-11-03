@@ -1,0 +1,46 @@
+From da39f5fe67c4c8904418bb610658af5242450b56 Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Mon, 2 Nov 2026 08:07:20 +0100
+Subject: [PATCH 107/112] media: exynos4-is: use jiffies instead of ms for
+ timeouts in fimc-is
+
+fimc_is_wait_event() passed its timeout to wait_event_timeout() as jiffies, while all but one
+caller pass milliseconds. Convert in the helper and fix the caller that already converted.
+
+Taken from commit adf2913b in https://gitlab.com/martin.juecker/linux (branch v7.1.1-exynos4-camera).
+Link: https://gitlab.com/exynos4-mainline/linux/-/merge_requests/28
+---
+ drivers/media/platform/samsung/exynos4-is/fimc-is.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/samsung/exynos4-is/fimc-is.c b/drivers/media/platform/samsung/exynos4-is/fimc-is.c
+index b7d9bfedd..84265977b 100644
+--- a/drivers/media/platform/samsung/exynos4-is/fimc-is.c
++++ b/drivers/media/platform/samsung/exynos4-is/fimc-is.c
+@@ -289,12 +289,12 @@ int fimc_is_cpu_set_power(struct fimc_is *is, int on)
+ 
+ /* Wait until @bit of @is->state is set to @state in the interrupt handler. */
+ int fimc_is_wait_event(struct fimc_is *is, unsigned long bit,
+-		       unsigned int state, unsigned int timeout)
++		       unsigned int state, unsigned int timeout_ms)
+ {
+ 
+ 	int ret = wait_event_timeout(is->irq_queue,
+ 				     !state ^ test_bit(bit, &is->state),
+-				     timeout);
++				     msecs_to_jiffies(timeout_ms));
+ 	if (ret == 0) {
+ 		dev_WARN(&is->pdev->dev, "%s() timed out\n", __func__);
+ 		return -ETIME;
+@@ -320,7 +320,7 @@ int fimc_is_start_firmware(struct fimc_is *is)
+ 		return ret;
+ 
+ 	ret = fimc_is_wait_event(is, IS_ST_A5_PWR_ON, 1,
+-				 msecs_to_jiffies(FIMC_IS_FW_LOAD_TIMEOUT));
++				 FIMC_IS_FW_LOAD_TIMEOUT);
+ 	if (ret < 0)
+ 		dev_err(dev, "FIMC-IS CPU power on failed\n");
+ 
+-- 
+2.53.0
+

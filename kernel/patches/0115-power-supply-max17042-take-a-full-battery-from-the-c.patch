@@ -1,0 +1,64 @@
+From e527a66a885e9a0ffeaab514a7c6929270d187f2 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Mon, 2 Nov 2026 22:52:48 +0100
+Subject: [PATCH 115/115] power: supply: max17042: take a full battery from the
+ charger without current sensing
+
+The end-of-charge check compares FullCAP with RepCap. In voltage-only
+mode the gauge counts no charge, so the two never meet and a supplied
+battery always read "charging": the Galaxy Note II's charger
+(MAX77693) said "Full" while the battery stayed "Charging" at 100 %.
+
+Without current sensing ask the supplying charger whether the battery
+is full.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/max17042_battery.c | 23 +++++++++++++++++------
+ 1 file changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
+index fa80068f7..e1c5bb3fb 100644
+--- a/drivers/power/supply/max17042_battery.c
++++ b/drivers/power/supply/max17042_battery.c
+@@ -163,6 +163,22 @@ static int max17042_get_status(struct max17042_chip *chip, int *status)
+ 		return 0;
+ 	}
+ 
++	/*
++	 * Without current sensing the gauge counts no charge, so its
++	 * end-of-charge detection below never triggers: ask the charger.
++	 */
++	if (!chip->enable_current_sense) {
++		union power_supply_propval val;
++
++		ret = power_supply_get_property_from_supplier(chip->battery,
++				POWER_SUPPLY_PROP_STATUS, &val);
++		if (ret == 0 && val.intval == POWER_SUPPLY_STATUS_FULL)
++			*status = POWER_SUPPLY_STATUS_FULL;
++		else
++			*status = POWER_SUPPLY_STATUS_CHARGING;
++		return 0;
++	}
++
+ 	/*
+ 	 * The MAX170xx has builtin end-of-charge detection and will update
+ 	 * FullCAP to match RepCap when it detects end of charging.
+@@ -188,13 +204,8 @@ static int max17042_get_status(struct max17042_chip *chip, int *status)
+ 
+ 	/*
+ 	 * Even though we are supplied, we may still be discharging if the
+-	 * supply is e.g. only delivering 5V 0.5A. Check current if available.
++	 * supply is e.g. only delivering 5V 0.5A.
+ 	 */
+-	if (!chip->enable_current_sense) {
+-		*status = POWER_SUPPLY_STATUS_CHARGING;
+-		return 0;
+-	}
+-
+ 	ret = regmap_read(chip->regmap, MAX17042_Current, &data);
+ 	if (ret < 0)
+ 		return ret;
+-- 
+2.53.0
+

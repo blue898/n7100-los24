@@ -1,0 +1,42 @@
+From 5ca1a939caa6e6c6fff7679edf8f4c9896c69f46 Mon Sep 17 00:00:00 2001
+From: Martin Juecker <martin.juecker@gmail.com>
+Date: Mon, 2 Nov 2026 08:07:20 +0100
+Subject: [PATCH 111/112] media: exynos4-is: adjust sensor data address
+
+The firmware expects the DMA address of struct sensor_open_extended in ISSR4 with
+HIC_OPEN_SENSOR, not the start of the parameter region. With the wrong address it never
+finishes opening the sensor.
+
+Fixes: 9a761e436843 ("[media] exynos4-is: Add Exynos4x12 FIMC-IS driver")
+
+Taken from commit b2093924 in https://gitlab.com/martin.juecker/linux (branch v7.1.1-exynos4-camera).
+Link: https://gitlab.com/exynos4-mainline/linux/-/merge_requests/28
+---
+ drivers/media/platform/samsung/exynos4-is/fimc-is.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/samsung/exynos4-is/fimc-is.c b/drivers/media/platform/samsung/exynos4-is/fimc-is.c
+index 84265977b..e528b5783 100644
+--- a/drivers/media/platform/samsung/exynos4-is/fimc-is.c
++++ b/drivers/media/platform/samsung/exynos4-is/fimc-is.c
+@@ -615,6 +615,8 @@ static int fimc_is_hw_open_sensor(struct fimc_is *is,
+ 				  struct fimc_is_sensor *sensor)
+ {
+ 	struct sensor_open_extended *soe = (void *)&is->is_p_region->shared;
++	dma_addr_t soe_dma_addr = is->is_dma_p_region +
++					offsetof(struct is_region, shared);
+ 
+ 	fimc_is_hw_wait_intmsr0_intmsd0(is);
+ 
+@@ -638,7 +640,7 @@ static int fimc_is_hw_open_sensor(struct fimc_is *is,
+ 	mcuctl_write(is->sensor_index, is, MCUCTL_REG_ISSR(1));
+ 	mcuctl_write(sensor->drvdata->id, is, MCUCTL_REG_ISSR(2));
+ 	mcuctl_write(sensor->i2c_bus, is, MCUCTL_REG_ISSR(3));
+-	mcuctl_write(is->is_dma_p_region, is, MCUCTL_REG_ISSR(4));
++	mcuctl_write(soe_dma_addr, is, MCUCTL_REG_ISSR(4));
+ 
+ 	fimc_is_hw_set_intgr0_gd0(is);
+ 
+-- 
+2.53.0
+

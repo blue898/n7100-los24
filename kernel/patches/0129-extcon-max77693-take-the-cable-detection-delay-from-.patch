@@ -1,0 +1,86 @@
+From afef8d599da0eba2227823d85902a8d24338dfff Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 18:30:17 +0100
+Subject: [PATCH 129/130] extcon: max77693: take the cable detection delay from
+ the device tree
+
+The MUIC detects the cable 20 s after probe (DELAY_MS_DEFAULT), a delay
+from the platform data days for platform code to be ready. Until then the
+USB switches stay as the bootloader left them. On midas a USB gadget bound
+before that never connects: the LineageOS recovery binds at ~13 s, the
+host sees nothing, and only binding again after the detection brings it
+up. Android binds after 30 s and never ran into it.
+
+Read the delay from "maxim,detcable-delay-ms" when there is no platform
+data, and set it to 1 s on midas. The charger and the USB PHY have probed
+by then, dwc2 too, and the charger reads the state when it registers.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Documentation/devicetree/bindings/mfd/maxim,max77693.yaml | 6 ++++++
+ arch/arm/boot/dts/samsung/exynos4412-midas.dtsi           | 5 +++++
+ drivers/extcon/extcon-max77693.c                          | 6 +++++-
+ 3 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/mfd/maxim,max77693.yaml b/Documentation/devicetree/bindings/mfd/maxim,max77693.yaml
+index cce273ba4..b1b89f10b 100644
+--- a/Documentation/devicetree/bindings/mfd/maxim,max77693.yaml
++++ b/Documentation/devicetree/bindings/mfd/maxim,max77693.yaml
+@@ -54,6 +54,12 @@ properties:
+       compatible:
+         const: maxim,max77693-muic
+ 
++      maxim,detcable-delay-ms:
++        description:
++          Time from probe to the first cable detection. Until then the USB and
++          UART switches stay as the bootloader left them.
++        default: 20000
++
+       connector:
+         $ref: /schemas/connector/usb-connector.yaml#
+         unevaluatedProperties: false
+diff --git a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+index 0a63271ae..966795063 100644
+--- a/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
++++ b/arch/arm/boot/dts/samsung/exynos4412-midas.dtsi
+@@ -186,6 +186,11 @@ max77693_pmic: pmic@66 {
+ 
+ 			muic {
+ 				compatible = "maxim,max77693-muic";
++				/*
++				 * Switch USB to the AP before userspace binds a gadget: one bound
++				 * before the first detection doesn't connect.
++				 */
++				maxim,detcable-delay-ms = <1000>;
+ 
+ 				usb_conn: connector {
+ 					compatible = "samsung,usb-connector-11pin",
+diff --git a/drivers/extcon/extcon-max77693.c b/drivers/extcon/extcon-max77693.c
+index d4c84797b..f78f98efd 100644
+--- a/drivers/extcon/extcon-max77693.c
++++ b/drivers/extcon/extcon-max77693.c
+@@ -14,6 +14,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/err.h>
+ #include <linux/platform_device.h>
++#include <linux/property.h>
+ #include <linux/mfd/max77693.h>
+ #include <linux/mfd/max77693-common.h>
+ #include <linux/mfd/max77693-private.h>
+@@ -1256,9 +1257,12 @@ static int max77693_muic_probe(struct platform_device *pdev)
+ 		else
+ 			delay_jiffies = msecs_to_jiffies(DELAY_MS_DEFAULT);
+ 	} else {
++		u32 delay_ms = DELAY_MS_DEFAULT;
++
+ 		info->path_usb = MAX77693_CONTROL1_SW_USB;
+ 		info->path_uart = MAX77693_CONTROL1_SW_UART;
+-		delay_jiffies = msecs_to_jiffies(DELAY_MS_DEFAULT);
++		device_property_read_u32(&pdev->dev, "maxim,detcable-delay-ms", &delay_ms);
++		delay_jiffies = msecs_to_jiffies(delay_ms);
+ 	}
+ 
+ 	/* Set initial path for UART when JIG is connected to get serial logs */
+-- 
+2.53.0
+

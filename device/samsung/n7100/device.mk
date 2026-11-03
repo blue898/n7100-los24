@@ -22,6 +22,7 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.wifi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.xml \
     $(DEVICE_PATH)/rootdir/wifi/wpa_supplicant.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf \
+    $(DEVICE_PATH)/rootdir/wifi/wpa_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant_overlay.conf \
     external/wireless-regdb/regulatory.db:$(TARGET_COPY_OUT_VENDOR)/firmware/regulatory.db \
     external/wireless-regdb/regulatory.db.p7s:$(TARGET_COPY_OUT_VENDOR)/firmware/regulatory.db.p7s
 
@@ -41,12 +42,13 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     android.hardware.sensors-service.n7100
 
-# Camera: rear S5C73M3 through FIMC0 (camera/, a fork of AOSP's external camera HAL)
+# Camera: rear S5C73M3 through FIMC0, front S5K6A3 through FIMC-IS (camera/, a fork of AOSP's
+# external camera HAL). SystemUI offers the flashlight only with the camera.flash feature.
 PRODUCT_PACKAGES += \
     android.hardware.camera.provider-service.n7100
 PRODUCT_COPY_FILES += \
-    frameworks/native/data/etc/android.hardware.camera.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.xml \
-    frameworks/native/data/etc/android.hardware.camera.autofocus.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.autofocus.xml
+    frameworks/native/data/etc/android.hardware.camera.flash-autofocus.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.flash-autofocus.xml \
+    frameworks/native/data/etc/android.hardware.camera.front.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.front.xml
 
 # Telephony: XMM6262 3G modem (kernel modem_if). cbd boots it; libsec-ril (stock, its
 # libril.so dependency patched to libril-n7100.so) runs inside our AIDL radio HAL. AOSP's rild
@@ -79,9 +81,12 @@ PRODUCT_COPY_FILES += \
     $(DEVICE_PATH)/proprietary/etc/gps.cer:$(TARGET_COPY_OUT_VENDOR)/etc/gps.cer \
     frameworks/native/data/etc/android.hardware.location.gps.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.location.gps.xml
 
-# Framework configuration overlay (auto-brightness curve)
+# Configuration overlays: framework (auto-brightness curve, notification LED, power profile),
+# LineageOS SDK (LED capabilities), setup wizard (button spacing without a navigation bar)
 PRODUCT_PACKAGES += \
-    FrameworksResN7100
+    FrameworksResN7100 \
+    LineageSdkN7100 \
+    SetupWizardN7100
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.sensor.accelerometer.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.sensor.accelerometer.xml \
     frameworks/native/data/etc/android.hardware.sensor.gyroscope.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.sensor.gyroscope.xml \
@@ -109,6 +114,24 @@ PRODUCT_COPY_FILES += \
     $(DEVICE_PATH)/rootdir/init.n7100.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hw/init.n7100.rc \
     $(DEVICE_PATH)/rootdir/init.n7100.usb.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hw/init.n7100.usb.rc \
     $(DEVICE_PATH)/rootdir/ueventd.n7100.rc:$(TARGET_COPY_OUT_VENDOR)/etc/ueventd.rc
+
+# Recovery, two-stage (mkbootimg.mk): the loader that recovery.img starts and the recovery
+# ramdisk it unpacks from the vendor partition
+PRODUCT_PACKAGES += \
+    n7100_recovery_loader \
+    n7100_recovery_ramdisk
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.recovery.ui.brightness_file=/sys/class/backlight/panel/brightness \
+    ro.recovery.ui.max_brightness_file=/sys/class/backlight/panel/max_brightness
+PRODUCT_COPY_FILES += \
+    $(DEVICE_PATH)/rootdir/init.recovery.n7100.rc:$(TARGET_COPY_OUT_RECOVERY)/root/init.recovery.n7100.rc \
+    $(DEVICE_PATH)/prebuilt/bin/n7100tool:$(TARGET_COPY_OUT_RECOVERY)/root/system/bin/n7100tool
+
+# USB: system_server starts its USB service (USB debugging, file transfer, the USB mode
+# settings) only on devices with USB host or accessory support. The Note II has USB host (OTG);
+# accessory mode needs Android's f_accessory, which mainline doesn't have.
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.hardware.usb.host.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.usb.host.xml
 
 # n7100tool: hardware watchdog keeper (static ARM binary from n7100tool/; its dwc2
 # workaround is the kernel's keep_l0 now)

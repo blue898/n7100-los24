@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- The modem hangs off the EHCI controller over HSIC (bus 2, its OHCI companion is bus 3);
+         apps mustn't see or claim it. USB OTG is the DWC2 controller, bus 1. -->
+    <string-array name="config_usbHostDenylist" translatable="false">
+        <item>/dev/bus/usb/002/</item>
+        <item>/dev/bus/usb/003/</item>
+    </string-array>
+
+    <!-- RGB status LED (AN30259A): offer the notification light settings -->
+    <bool name="config_intrusiveNotificationLed">true</bool>
+
     <!-- CM36651 light sensor (the HAL reports its white channel as lux) -->
     <bool name="config_automatic_brightness_available">true</bool>
 

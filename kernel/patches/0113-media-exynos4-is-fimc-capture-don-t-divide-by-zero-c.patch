@@ -1,0 +1,35 @@
+From b4241d831d146570ecfd360ed925cb94b5f7b2cb Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Mon, 2 Nov 2026 21:08:04 +0100
+Subject: [PATCH] media: exynos4-is: fimc-capture: don't divide by zero
+ cropping a FIFO input
+
+The formats of the FIFO (writeback) input from FIMC-IS have no depth, so
+fimc_capture_try_selection() computed 64 / ALIGN(0, 8) for a crop
+rectangle on a capture node fed by the ISP. With clang that ends in an
+oops (paging request in fimc_capture_try_selection) and a panic, from a
+plain VIDIOC_S_SELECTION. Take 32 bits per pixel for a format without a
+depth, which is what the FIFO carries.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/platform/samsung/exynos4-is/fimc-capture.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/samsung/exynos4-is/fimc-capture.c b/drivers/media/platform/samsung/exynos4-is/fimc-capture.c
+index d85811f4b..23edf2543 100644
+--- a/drivers/media/platform/samsung/exynos4-is/fimc-capture.c
++++ b/drivers/media/platform/samsung/exynos4-is/fimc-capture.c
+@@ -664,7 +664,8 @@ static void fimc_capture_try_selection(struct fimc_ctx *ctx,
+ 		max_sc_v = min(SCALER_MAX_VRATIO, 1 << tmp_min_v);
+ 		min_sz = var->min_out_pixsize;
+ 	} else {
+-		u32 depth = fimc_get_format_depth(sink->fmt);
++		/* The FIFO (writeback) input formats have no depth: 32 bits per pixel */
++		u32 depth = fimc_get_format_depth(sink->fmt) ?: 32;
+ 		align_sz = 64/ALIGN(depth, 8);
+ 		min_sz = var->min_inp_pixsize;
+ 		min_w = min_h = min_sz;
+-- 
+2.53.0
+

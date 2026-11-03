@@ -1,0 +1,71 @@
+From 7cf2c73bd5e948f1437812a9655e66422cb6c989 Mon Sep 17 00:00:00 2001
+From: leo <leoschlosser@tutamail.com>
+Date: Tue, 3 Nov 2026 09:20:25 +0100
+Subject: [PATCH 124/128] wifi: brcmfmac: sdio: thaw the bus before the wiphy
+ resumes
+
+When the card keeps its power in suspend (WoWLAN, or a host that can't
+power it off), function 1's suspend freezes the bus, but only function
+2's resume thaws it. The wiphy is a child of function 1 and resumes
+before function 2, so everything cfg80211's resume sends to the
+firmware failed with "bus is down": "wowl_clear" and the power save
+mode after WoWLAN, for one.
+
+Thaw the bus in function 1's resume; function 2 still probes the device
+again when its power was cut.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../broadcom/brcm80211/brcmfmac/bcmsdh.c      | 22 ++++++++++++++-----
+ 1 file changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+index 71c2f99cd..c572dacc8 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+@@ -836,6 +836,11 @@ static void brcmf_sdiod_freezer_off(struct brcmf_sdio_dev *sdiodev)
+ 	brcmf_sdio_sleep(sdiodev->bus, false);
+ 	sdio_release_host(sdiodev->func1);
+ 	atomic_set(&sdiodev->freezer->freezing, 0);
++	/*
++	 * The bus is up again now: the DPC thread marks it so only once it runs,
++	 * after the wiphy may already have talked to the firmware in its resume
++	 */
++	brcmf_sdiod_change_state(sdiodev, BRCMF_SDIOD_DATA);
+ 	complete_all(&sdiodev->freezer->resumed);
+ }
+ 
+@@ -1233,6 +1238,18 @@ static int brcmf_ops_sdio_resume(struct device *dev)
+ 	bool cap_power_off = !!(func->card->host->caps & MMC_CAP_POWER_OFF_CARD);
+ 
+ 	brcmf_dbg(SDIO, "Enter: F%d\n", func->num);
++	/*
++	 * The power was kept: thaw the bus with function 1, which suspend froze.
++	 * The wiphy is a child of function 1 and resumes before function 2, and
++	 * cfg80211's resume talks to the firmware.
++	 */
++	if (func->num == 1 && (sdiodev->wowl_enabled || !cap_power_off)) {
++		if (sdiodev->wowl_enabled && sdiodev->settings->bus.sdio.oob_irq_supported)
++			disable_irq_wake(sdiodev->settings->bus.sdio.oob_irq_nr);
++
++		brcmf_sdiod_freezer_off(sdiodev);
++		return 0;
++	}
+ 	if (func->num != 2)
+ 		return 0;
+ 
+@@ -1243,11 +1260,6 @@ static int brcmf_ops_sdio_resume(struct device *dev)
+ 			brcmf_err("Failed to probe device on resume\n");
+ 		else
+ 			brcmf_bus_allow_reset_work(bus_if);
+-	} else {
+-		if (sdiodev->wowl_enabled && sdiodev->settings->bus.sdio.oob_irq_supported)
+-			disable_irq_wake(sdiodev->settings->bus.sdio.oob_irq_nr);
+-
+-		brcmf_sdiod_freezer_off(sdiodev);
+ 	}
+ 
+ 	return ret;
+-- 
+2.53.0
+

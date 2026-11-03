@@ -1,0 +1,14 @@
+# Recovery: USB gadget (adb, sideload, fastbootd) on the DWC2; bootable/recovery's init.rc sets
+# up the configfs gadget with these.
+on init
+    setprop sys.usb.configfs 1
+    setprop sys.usb.controller 12480000.usb
+    start n7100_watchdog
+
+# The kernel feeds the hardware watchdog (s3c2410_wdt.tmr_atboot) only for 180 s after boot
+# (CONFIG_WATCHDOG_OPEN_TIMEOUT), then resets the phone. As in Android, n7100tool takes over.
+service n7100_watchdog /system/bin/n7100tool watchdog 20 5
+    user root
+    group root
+    seclabel u:r:n7100tool:s0
+    disabled

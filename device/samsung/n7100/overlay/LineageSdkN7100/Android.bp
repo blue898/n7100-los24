@@ -1,0 +1,7 @@
+// LineageOS SDK configuration for the Note II
+
+runtime_resource_overlay {
+    name: "LineageSdkN7100",
+    vendor: true,
+    sdk_version: "current",
+}
