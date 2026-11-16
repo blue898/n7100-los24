@@ -237,6 +237,10 @@ Services& services();
 aconfig::SimSlotStatus currentSlotStatus();
 void notifySlotStatus();
 
+// Call audio: the modem's PCM state for the codec service (see RadioVoice.cpp)
+void callAudioWideband(bool wideband);
+void callAudioPublish();
+
 // Unsolicited responses of the legacy RIL -> AIDL indications
 void onUnsolicited(int id, const void* data, size_t len);
 
